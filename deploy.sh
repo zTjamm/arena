@@ -13,19 +13,9 @@ set -euo pipefail
 
 APP=/root/arena
 STAMP=$(date +%Y%m%d-%H%M%S)
-NGINX=/etc/nginx/sites-available/arena
-ENABLED=/etc/nginx/sites-enabled/arena
+SITE=/etc/nginx/sites-available/tic-tac-toe
 
 step() { echo; echo "=== $* ==="; }
-
-step "бэкап текущего конфига nginx"
-# Конфиг арены в первый раз ещё не существует — это не ошибка.
-if [ -f "$NGINX" ]; then
-    cp "$NGINX" "/root/arena-nginx-$STAMP"
-    echo "сохранён /root/arena-nginx-$STAMP"
-else
-    echo "конфига арены ещё нет, это первый деплой"
-fi
 
 step "чистим то, что помешает pull"
 cd "$APP"
@@ -61,42 +51,103 @@ mkdir -p "$TESTDATA"
 DATA_DIR="$TESTDATA" npm test
 
 step "nginx"
-# Сниппет добавляется один раз и дальше только обновляется.
-# Ключевая деталь — слэш на конце proxy_pass: он срезает префикс
-# /arena/, и приложение получает запрос как будто стоит в корне.
-cat > "$NGINX" <<'EOF'
-# Арена на выталкивание. Живёт по пути /arena/ рядом с «Точками
-# и квадратами», которая осталась в корне домена.
-location = /arena {
-    return 301 /arena/;
-}
+# Арена живёт по пути /arena/ внутри того же доменного блока, где уже
+# стоят «Точки и квадраты». Отдельным файлом это сделать нельзя:
+# директива location не допускается на верхнем уровне, nginx -t падает.
+#
+# Первая попытка ровно так и выглядела: отдельный sites-enabled/arena
+# с блоками location, и проверка его отклонила. Проверка — не формальность,
+# а предохранитель: перезагрузки не произошло, старая игра продолжила
+# работать. Поэтому правим существующий файл и всегда бэкапим его.
+#
+# Слэш на конце proxy_pass решает всё: он срезает префикс /arena/, и
+# приложение получает запрос так, будто стоит в корне.
+cat > /tmp/arena-locations.$$ <<'EOF'
 
-location /arena/ {
-    proxy_pass http://127.0.0.1:8100/;
-    proxy_http_version 1.1;
+    # АРЕНА: НАЧАЛО — правка deploy.sh, вручную не трогать
+    location = /arena {
+        return 301 /arena/;
+    }
 
-    # Сокет не работает без этих двух заголовков: без Upgrade
-    # соединение остаётся обычным HTTP и таймаутится, а Connection
-    # без upgrade ломает всё, что websocket-ом не является.
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection 'upgrade';
+    location /arena/ {
+        proxy_pass http://127.0.0.1:8100/;
+        proxy_http_version 1.1;
 
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_cache_bypass $http_upgrade;
+        # Сокет не работает без этих двух заголовков: без Upgrade
+        # соединение остаётся обычным HTTP и таймаутится.
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
 
-    # Игра идёт в реальном времени, кэшировать нечего, а долгий
-    # апдейт апстрима оборвал бы соединение минутелю.
-    proxy_read_timeout 300s;
-    proxy_send_timeout 300s;
-}
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_cache_bypass $http_upgrade;
+
+        # Игра идёт в реальном времени: кэшировать нечего, а долгий
+        # апдейт апстрима обрывал бы соединение на минуте.
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+    # АРЕНА: КОНЕЦ
 EOF
 
-ln -sf "$NGINX" "$ENABLED"
+cp "$SITE" "/root/tic-tac-toe-nginx-$STAMP"
+echo "бэкап: /root/tic-tac-toe-nginx-$STAMP"
 
-# Проверка обязательна. Если конфиг невалиден, nginx не перезагрузится
-# и продолжит работать на прежнем — проверенном.
-nginx -t
+python3 - "$SITE" /tmp/arena-locations.$$ <<'PY'
+import sys
+
+site, patch_file = sys.argv[1], sys.argv[2]
+BEGIN = '# АРЕНА: НАЧАЛО'
+END = '# АРЕНА: КОНЕЦ'
+
+with open(site, encoding='utf-8') as f:
+    lines = f.readlines()
+
+with open(patch_file, encoding='utf-8') as f:
+    patch = f.readlines()
+
+# Прежний блок вырезаем, чтобы повторный деплой не копировал его
+# второй раз. Без этого nginx -t упал бы на дублирующем location
+# уже на втором прогоне.
+clean = []
+inside = False
+for ln in lines:
+    if BEGIN in ln:
+        inside = True
+        continue
+    if inside:
+        if END in ln:
+            inside = False
+        continue
+    clean.append(ln)
+
+# Последняя закрывающая скобка файла закрывает https-блок, и вставка
+# перед ней кладёт арену именно туда, а не в http-редирект.
+for i in range(len(clean) - 1, -1, -1):
+    if clean[i].strip() == '}':
+        break
+else:
+    raise SystemExit('в конфиге нет закрывающей скобки server-блока')
+
+clean[i:i] = patch
+
+with open(site, 'w', encoding='utf-8') as f:
+    f.writelines(clean)
+
+print(f'вставлено {len(patch)} строк в {site}')
+PY
+
+rm -f /tmp/arena-locations.$$
+
+# Проверка обязательна и не обходится. Если конфиг невалиден, nginx не
+# перезагрузится и продолжит работать на прежнем — а мы откатим файл.
+if ! nginx -t; then
+    echo "КОНФИГ НЕВАЛИДЕН - ОТКАТЫВАЮ"
+    cp "/root/tic-tac-toe-nginx-$STAMP" "$SITE"
+    nginx -t
+    exit 1
+fi
+
 systemctl reload nginx
 echo "nginx перезагружен"
 
@@ -121,9 +172,17 @@ curl -fsS http://127.0.0.1:8100/ > /dev/null || {
 echo "арена отвечает"
 
 curl -fsS -o /dev/null -w 'через nginx: %{http_code}\n' \
-    -H 'Host: mypoddomenjm.mooo.com' \
-    https://127.0.0.1/arena/
+    -k --resolve mypoddomenjm.mooo.com:443:127.0.0.1 \
+    https://mypoddomenjm.mooo.com/arena/
+
+# Существующая игра не должна пострадать: проверяем её корень в том же
+# прогоне. Молчание об успехе тут обманчиво — арена может подняться,
+# а крестики лечь.
+curl -fsS -o /dev/null -w 'крестики на месте: %{http_code}\n' \
+    -k --resolve mypoddomenjm.mooo.com:443:127.0.0.1 \
+    https://mypoddomenjm.mooo.com/
 
 step "готово"
-echo "арена: https://mypoddomenjm.mooo.com/arena/"
-echo "откат: скопировать /root/arena-nginx-$STAMP на место и nginx -t && systemctl reload nginx"
+echo "арена:     https://mypoddomenjm.mooo.com/arena/"
+echo "крестики:  https://mypoddomenjm.mooo.com/"
+echo "откат:     cp /root/tic-tac-toe-nginx-$STAMP $SITE && nginx -t && systemctl reload nginx"
