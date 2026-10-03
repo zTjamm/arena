@@ -30,6 +30,14 @@ const { Lobby } = require('./game/lobby');
 const { Accounts } = require('./accounts');
 
 const PORT = Number(process.env.PORT) || 8100;
+
+// Путь, по которому ходит socket.io. По умолчанию — корень домена,
+// и это же значение по умолчанию подставляет клиент из адреса
+// страницы. Менять нужно только когда арена лежит не в корне, а под
+// общим сайтом с несколькими играми: тогда и сокет обязан быть там
+// же, иначе запрос уйдёт в чужую игру.
+const SOCKET_PATH = process.env.SOCKET_PATH || '/socket.io';
+
 const TICK_MS = 1000 / 30;
 const PACE_MS = 250;   // как часто проверять подбор и напоминать об отсчёте
 const CHAT_MAX = 300;  // длина сообщения в символах
@@ -43,7 +51,7 @@ const EMPTY_INPUT = Object.freeze({
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { path: SOCKET_PATH });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -456,4 +464,5 @@ setInterval(() => {
 
 server.listen(PORT, () => {
     console.log(`[arena] http://127.0.0.1:${PORT}`);
+    console.log(`[arena] socket.io ждёт по пути ${SOCKET_PATH}`);
 });
