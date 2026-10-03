@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Арена</title>
+<style>
+    :root {
+        --bg: #0c111c;
+        --ink: #e8f0ff;
+        --dim: rgba(232, 240, 255, 0.6);
+        --faint: rgba(232, 240, 255, 0.4);
+        --line: rgba(232, 240, 255, 0.1);
+        --accent: #4da3ff;
+        --danger: #ff5d7a;
+        --good: #5ad39a;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        /* Не выделять текст случайным тапом: в телефонной партии
+           выделение — это залипший кусок экрана, а не полезная функция. */
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .hidden { display: none !important; }
+
+    /* --- экраны ---------------------------------------------------------- */
+
+    .screen { position: fixed; inset: 0; display: none; flex-direction: column; }
+    .screen.on { display: flex; }
+
+    /* --- общие детали ---------------------------------------------------- */
+
+    button {
+        font: inherit;
+        font-size: 15px;
+        font-weight: 600;
+        padding: 11px 18px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        background: var(--accent);
+        color: #06101f;
+        cursor: pointer;
+    }
+
+    button.ghost {
+        background: transparent;
+        border-color: rgba(232, 240, 255, 0.28);
+        color: var(--dim);
+    }
+
+    button.sm { padding: 8px 13px; font-size: 13.5px; border-radius: 8px; }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: 0.45; cursor: default; }
+
+    input {
+        font: inherit;
+        font-size: 16px;   /* меньше 16 iOS при фокусе зумит экран */
+        padding: 11px 12px;
+        border-radius: 9px;
+        border: 1px solid rgba(232, 240, 255, 0.18);
+        background: rgba(232, 240, 255, 0.06);
+        color: var(--ink);
+        width: 100%;
+    }
+
+    input:focus { outline: none; border-color: var(--accent); }
+    input::placeholder { color: rgba(232, 240, 255, 0.32); }
+
+    .tabs { display: flex; gap: 6px; flex: none; padding: 8px 12px 0; }
+
+    .tab {
+        flex: 1;
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--dim);
+        padding: 9px 4px;
+        font-size: 13.5px;
+        position: relative;
+    }
+
+    .tab.on {
+        background: rgba(77, 163, 255, 0.16);
+        border-color: rgba(77, 163, 255, 0.55);
+        color: var(--ink);
+    }
+
+    .badge {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 9px;
+        background: var(--danger);
+        color: #14000a;
+        font-size: 11.5px;
+        font-weight: 700;
+        line-height: 18px;
+        text-align: center;
+    }
+
+    /* --- авторизация ----------------------------------------------------- */
+
+    #authScreen.on { display: flex; align-items: center; justify-content: center; padding: 20px; }
+
+    .authCard {
+        width: min(390px, 100%);
+        padding: 26px 24px;
+        border-radius: 18px;
+        background: rgba(18, 25, 40, 0.94);
+        border: 1px solid rgba(232, 240, 255, 0.14);
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+    }
+
+    .authCard h1 { margin: 0; font-size: 30px; letter-spacing: 4px; text-align: center; }
+    .authCard .tagline { margin: 4px 0 18px; text-align: center; color: var(--faint); font-size: 13.5px; }
+    .authForm { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+
+    .error { color: var(--danger); font-size: 14px; min-height: 18px; margin-top: 10px; text-align: center; }
+    .note { color: var(--faint); font-size: 12.5px; text-align: center; margin: 12px 0 0; line-height: 1.45; }
+
+    /* --- чат ------------------------------------------------------------- */
+
+    .chatHead {
+        flex: none;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 14px;
+        padding-top: calc(10px + env(safe-area-inset-top));
+        border-bottom: 1px solid var(--line);
+    }
+
+    .chatHead .who { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+    .chatHead .who b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chatHead .who span { color: var(--faint); font-size: 13px; white-space: nowrap; }
+
+    .tabBody { flex: 1 1 auto; min-height: 0; position: relative; }
+
+    .pane { position: absolute; inset: 0; display: none; flex-direction: column; }
+    .pane.on { display: flex; }
+
+    .messages {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-y;
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+    }
+
+    .msg { font-size: 14.5px; line-height: 1.4; word-break: break-word; }
+    .msg b { color: var(--accent); }
+    .msg.me b { color: var(--good); }
+    .msg time { color: rgba(232, 240, 255, 0.28); font-size: 11.5px; margin-left: 6px; }
+    .sys { color: var(--faint); font-size: 13px; font-style: italic; }
+
+    /* Каналы чата и состав комнаты живут над сообщениями и только
+       пока комната открыта: вне её переключать нечего. */
+    .chanBar { display: flex; gap: 6px; flex: none; padding: 8px 12px 0; }
+
+    .chan {
+        flex: 1;
+        position: relative;
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--dim);
+        padding: 8px 4px;
+        font-size: 13.5px;
+    }
+
+    .chan.on {
+        background: rgba(77, 163, 255, 0.16);
+        border-color: rgba(77, 163, 255, 0.55);
+        color: var(--ink);
+    }
+
+    .slots {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        flex: none;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+    }
+
+    .chip {
+        font-size: 13px;
+        font-weight: 600;
+        padding: 5px 11px;
+        border-radius: 999px;
+        background: rgba(77, 163, 255, 0.16);
+        border: 1px solid rgba(77, 163, 255, 0.4);
+    }
+
+    .chip.me { background: rgba(90, 211, 154, 0.18); border-color: rgba(90, 211, 154, 0.5); }
+    .chip.free { background: transparent; border-color: var(--line); color: var(--faint); font-weight: 500; }
+
+    .chatInput {
+        flex: none;
+        display: flex;
+        gap: 8px;
+        padding: 10px 12px;
+        border-top: 1px solid var(--line);
+    }
+
+    .chatInput button { padding: 11px 16px; flex: none; }
+
+    .scroller {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-y;
+        padding: 12px 14px;
+    }
+
+    .rowline {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        padding: 9px 2px;
+        border-bottom: 1px solid rgba(232, 240, 255, 0.07);
+        font-size: 14.5px;
+    }
+
+    .rowline .pos { width: 24px; text-align: right; color: var(--faint); flex: none; }
+    .rowline .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .rowline .pts { font-weight: 700; flex: none; }
+    .rowline .pts.neg { color: var(--danger); }
+    .rowline .meta { color: var(--faint); font-size: 12.5px; flex: none; }
+    .rowline .tag { color: var(--good); font-size: 12.5px; }
+
+    .block h3 {
+        font-size: 12.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--faint);
+        margin: 16px 0 2px;
+        font-weight: 600;
+    }
+
+    .block h3:first-child { margin-top: 0; }
+
+    .fr { display: flex; gap: 8px; align-items: center; padding: 9px 2px; border-bottom: 1px solid rgba(232, 240, 255, 0.07); }
+    .fr .who { flex: 1; min-width: 0; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; }
+    .fr .status { color: var(--faint); font-size: 12.5px; }
+
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: rgba(232, 240, 255, 0.22); margin-right: 7px; vertical-align: middle; }
+    .dot.chat { background: var(--good); }
+    .dot.room { background: var(--accent); }
+    .dot.game { background: #ffcc4d; }
+
+    .inlineForm { display: flex; gap: 8px; margin-bottom: 4px; }
+    .inlineForm button { flex: none; }
+
+    .empty { color: var(--faint); font-size: 13.5px; padding: 8px 2px; }
+
+    .prose { font-size: 14.5px; line-height: 1.6; color: rgba(232, 240, 255, 0.82); }
+    .prose h3 { color: var(--ink); font-size: 15px; margin: 18px 0 5px; }
+    .prose h3:first-child { margin-top: 0; }
+    .prose p { margin: 5px 0; }
+    .prose .kbd {
+        font: inherit;
+        font-size: 12.5px;
+        padding: 1px 6px;
+        border-radius: 5px;
+        border: 1px solid rgba(232, 240, 255, 0.24);
+        background: rgba(232, 240, 255, 0.07);
+    }
+
+    .chatFoot {
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px 12px;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom));
+        border-top: 1px solid var(--line);
+    }
+
+    .roomBar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 11px;
+        border-radius: 10px;
+        background: rgba(77, 163, 255, 0.13);
+        border: 1px solid rgba(77, 163, 255, 0.38);
+        font-size: 13.5px;
+        line-height: 1.35;
+    }
+
+    .roomBar .row { display: flex; gap: 6px; flex: none; }
+    .play { width: 100%; padding: 15px; font-size: 17px; border-radius: 12px; }
+
+    /* --- уведомления ------------------------------------------------------ */
+
+    #toasts {
+        position: fixed;
+        top: calc(14px + env(safe-area-inset-top));
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(430px, calc(100vw - 24px));
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        z-index: 60;
+        pointer-events: none;
+    }
+
+    .toast {
+        pointer-events: auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 11px;
+        background: rgba(18, 25, 40, 0.97);
+        border: 1px solid rgba(232, 240, 255, 0.18);
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+        font-size: 14px;
+        line-height: 1.35;
+        animation: pop 0.18s ease-out;
+    }
+
+    .toast .grow { flex: 1; min-width: 0; }
+    .toast button { padding: 7px 12px; font-size: 13.5px; flex: none; }
+
+    @keyframes pop {
+        from { opacity: 0; transform: translateY(-8px); }
+        to { opacity: 1; transform: none; }
+    }
+
+    /* --- партия ----------------------------------------------------------- */
+
+    #gameScreen { touch-action: none; }
+
+    #field { position: fixed; inset: 0; display: block; }
+
+    #hud {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 14px;
+        padding-top: calc(10px + env(safe-area-inset-top));
+        font-size: 13px;
+        line-height: 1.3;
+        background: linear-gradient(rgba(12, 17, 28, 0.92), rgba(12, 17, 28, 0));
+        pointer-events: none;
+        z-index: 5;
+    }
+
+    #hudMe { color: var(--ink); font-weight: 600; }
+    #hudStatus { color: var(--dim); text-align: right; }
+
+    #panel {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: min(430px, calc(100vw - 32px));
+        max-height: calc(100vh - 40px);
+        overflow-y: auto;
+        padding: 20px;
+        border-radius: 16px;
+        background: rgba(18, 25, 40, 0.94);
+        border: 1px solid rgba(232, 240, 255, 0.14);
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+        text-align: center;
+        z-index: 20;
+    }
+
+    #panel h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: 0.2px; }
+    #panelSub { margin: 0 0 12px; font-size: 14px; color: var(--dim); min-height: 18px; }
+
+    #score {
+        display: inline-block;
+        margin: 0 0 12px;
+        padding: 6px 13px;
+        border-radius: 9px;
+        background: rgba(232, 240, 255, 0.08);
+        border: 1px solid var(--line);
+        font-size: 14.5px;
+        font-weight: 600;
+    }
+
+    #score.plus { color: var(--good); border-color: rgba(90, 211, 154, 0.4); }
+    #score.minus { color: var(--danger); border-color: rgba(255, 93, 122, 0.4); }
+
+    #feed {
+        margin: 0 0 14px;
+        padding: 0;
+        list-style: none;
+        font-size: 13px;
+        color: var(--dim);
+        max-height: 132px;
+        overflow: hidden;
+    }
+
+    #feed li { padding: 2px 0; }
+    #feed b { color: var(--ink); font-weight: 600; }
+
+    .row { display: flex; gap: 8px; justify-content: center; }
+
+    #hint {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 10px 14px;
+        padding-bottom: calc(10px + env(safe-area-inset-bottom));
+        text-align: center;
+        font-size: 12.5px;
+        color: rgba(232, 240, 255, 0.45);
+        pointer-events: none;
+        z-index: 5;
+    }
+
+    #hint kbd {
+        font: inherit;
+        padding: 1px 5px;
+        border-radius: 4px;
+        border: 1px solid rgba(232, 240, 255, 0.24);
+        background: rgba(232, 240, 255, 0.07);
+    }
+
+    /* --- сенсорное управление -------------------------------------------- */
+
+    #touch {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: none;
+        align-items: flex-end;
+        justify-content: space-between;
+        padding: 0 18px;
+        padding-bottom: calc(16px + env(safe-area-inset-bottom));
+        z-index: 15;
+    }
+
+    body.touch #touch { display: flex; }
+    body.touch #hint { display: none; }
+
+    /* Фиксированное основание джойстика: точка касания предсказуема,
+       а левый нижний угол — под большим пальцем левой руки. */
+    #stick {
+        position: relative;
+        width: 132px;
+        height: 132px;
+        border-radius: 50%;
+        background: rgba(232, 240, 255, 0.06);
+        border: 1.5px solid rgba(232, 240, 255, 0.18);
+        flex: none;
+    }
+
+    #knob {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 56px;
+        height: 56px;
+        margin: -28px 0 0 -28px;
+        border-radius: 50%;
+        background: rgba(232, 240, 255, 0.30);
+        border: 1.5px solid rgba(232, 240, 255, 0.45);
+        will-change: transform;
+    }
+
+    /* Три кнопки укладываются в две строки: толчок крупный и под
+   двумя, прыжок и камень — мельче сверху. Тремя в столбик они не
+   помещались: 96×3 плюс промежутки не влезали в низ экрана, и нижняя
+   кнопка уезжала под системную панель телефона. */
+    #buttons {
+        display: grid;
+        grid-template-columns: auto auto;
+        gap: 12px;
+        align-items: end;
+        justify-items: end;
+    }
+
+    #buttons button {
+        width: 82px;
+        height: 82px;
+        border-radius: 50%;
+        font-size: 12px;
+        line-height: 1.1;
+        padding: 0;
+        background: rgba(232, 240, 255, 0.10);
+        border: 1.5px solid rgba(232, 240, 255, 0.30);
+        color: var(--ink);
+    }
+
+    /* Толчок — главная кнопка, и держать её надо дольше всех,
+       поэтому он самый крупный и стоит под остальными: палец
+       на нём не соскальзывает, даже если сдвинулся. */
+    #buttons #btnPush {
+        grid-column: 2;
+        grid-row: 2;
+        border-color: rgba(127, 208, 255, 0.75);
+        background: rgba(127, 208, 255, 0.16);
+        width: 100px;
+        height: 100px;
+        font-size: 13px;
+    }
+
+    #buttons #btnJump {
+        grid-column: 1;
+        grid-row: 1;
+        border-color: rgba(255, 210, 61, 0.65);
+        background: rgba(255, 210, 61, 0.14);
+    }
+
+    #buttons #btnStone {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    /* Камень коричневый — тем же цветом, что и звезда его отката,
+       чтобы кнопка и перезарядка читались как одно и то же. */
+    #buttons #btnStone {
+        border-color: rgba(176, 122, 74, 0.75);
+        background: rgba(176, 122, 74, 0.16);
+    }
+
+    #buttons button.held { filter: brightness(1.5); transform: scale(0.95); }
+
+    @media (max-height: 460px) {
+        #stick { width: 104px; height: 104px; }
+        #buttons { gap: 8px; }
+        #buttons button { width: 66px; height: 66px; font-size: 10px; }
+        #buttons #btnPush { width: 82px; height: 82px; font-size: 11px; }
+    }
+</style>
+</head>
+<body>
+
+<!-- === авторизация ===================================================== -->
+
+<div id="authScreen" class="screen on">
+    <div class="authCard">
+        <h1>АРЕНА</h1>
+        <p class="tagline">Арена на выталкивание</p>
+
+        <div class="tabs">
+            <button type="button" class="tab on" data-auth="login">Вход</button>
+            <button type="button" class="tab" data-auth="register">Регистрация</button>
+        </div>
+
+        <form id="loginForm" class="authForm">
+            <input id="loginNick" placeholder="Ник" autocomplete="username" maxlength="16">
+            <input id="loginPass" type="password" placeholder="Пароль" autocomplete="current-password">
+            <button type="submit">Войти</button>
+        </form>
+
+        <form id="registerForm" class="authForm hidden">
+            <input id="regNick" placeholder="Ник" autocomplete="username" maxlength="16">
+            <input id="regPass" type="password" placeholder="Пароль" autocomplete="new-password">
+            <input id="regPass2" type="password" placeholder="Повторите пароль" autocomplete="new-password">
+            <button type="submit">Зарегистрироваться</button>
+        </form>
+
+        <div id="authError" class="error"></div>
+        <p class="note">Регистр не важен: «Игрок» и «игрок» — один ник,<br>второй раз такой не зарегистрировать.</p>
+    </div>
+</div>
+
+<!-- === чат ============================================================= -->
+
+<div id="chatScreen" class="screen">
+    <header class="chatHead">
+        <div class="who">
+            <b id="meNick"></b>
+            <span id="meMeta"></span>
+        </div>
+        <button id="logoutBtn" type="button" class="ghost sm">Выход</button>
+    </header>
+
+    <nav class="tabs">
+        <button type="button" class="tab on" data-tab="chat">Чат</button>
+        <button type="button" class="tab" data-tab="rating">Рейтинг</button>
+        <button type="button" class="tab" data-tab="rules">Правила</button>
+        <button type="button" class="tab" data-tab="friends">Друзья<span id="friendsBadge" class="badge hidden">0</span></button>
+    </nav>
+
+    <div class="tabBody">
+        <section id="tabChat" class="pane on">
+            <div id="chanBar" class="chanBar hidden">
+                <button type="button" class="chan on" data-chan="global">Общий</button>
+                <button type="button" class="chan" data-chan="room">Комната<span id="roomBadge" class="badge hidden">0</span></button>
+            </div>
+            <div id="roomSlots" class="slots hidden"></div>
+            <div id="messages" class="messages"></div>
+            <form id="chatForm" class="chatInput">
+                <input id="chatInput" placeholder="Сообщение" maxlength="300" autocomplete="off">
+                <button type="submit">→</button>
+            </form>
+        </section>
+
+        <section id="tabRating" class="pane">
+            <div id="ratingList" class="scroller"></div>
+        </section>
+
+        <section id="tabRules" class="pane">
+            <div class="scroller">
+                <div class="prose">
+                    <h3>Смысл</h3>
+                    <p>На площадке восемь героев. Игра кончается, когда остаётся один: таймера и ничьих нет.</p>
+                    <p>Выбил за край — выбыл. Место = порядок выбывания: первый вылетевший — восьмой, последний проигравший — второй.</p>
+                    <p><b>За край выносит только толчок.</b> Дойти своими ногами нельзя: граница просто прижимает. Упасть можно ровно одним способом — быть вытолкнутым.</p>
+
+                    <h3>Движение</h3>
+                    <p>На ПК — <span class="kbd">WASD</span> или стрелки, на телефоне — виртуальный джойстик слева.</p>
+                    <p>Обычное столкновение просто разводит круги — ни толчка, ни оглушения.</p>
+
+                    <h3>Толчок: держи и отпускай</h3>
+                    <p><span class="kbd">Space</span> или кнопка ТОЛЧОК. <b>Держите кнопку</b>: пока держите, копится заряд, и цифра над вашим героем показывает ступень. 1 секунда — 100 единиц отлёта, 2 — 200, 3 и больше — 300. <b>Удар уходит при отпускании.</b></p>
+                    <p>Откат 3 секунды на все ступени. Отпустите раньше секунды — удара не будет, откат не потратится.</p>
+                    <p>Бьётся только <b>ближайший</b> в конусе перед носиком. Если он влетел в другого — тот отлетит на половину удара, а первый остановится. Цепочка работает сама.</p>
+                    <p>Перед вами рисуются две дуги: яркая — досягаемость, пунктирная — как далеко отлетит соперник при текущем заряде. Она растёт вместе с цифрой.</p>
+
+                    <h3>Прыжок</h3>
+                    <p><span class="kbd">Shift</span> или кнопка ПРЫЖОК. Откат 5 секунд. Прыжок ровно на 300 единиц, и всё это время вы <b>неуязвимы</b>: толчок вас не выбьет, а за край вы не улетите.</p>
+
+                    <h3>Камень</h3>
+                    <p><span class="kbd">Q</span> или кнопка КАМЕНЬ. Откат 7 секунд. На 2 секунды вы превращаетесь в камень: неподвижны, и удар от вас <b>отскакивает</b> — бьющий отлетает на половину своего удара.</p>
+
+                    <h3>Перезарядки</h3>
+                    <p>Над каждым героем три звезды: синяя — толчок, золотая — прыжок, коричневая — камень. Звезда заполняется снизу вверх, а когда скилл готов — мигает.</p>
+
+                    <h3>Очки</h3>
+                    <p>1-е место +5 · 2-е +3 · 3-е +1 · 4–6-е 0 · 7–8-е −2. Очки начисляются только людям: боты в таблицу не попадают.</p>
+
+                    <h3>Подбор</h3>
+                    <p>Кнопка «Играть» открывает комнату на 30 секунд. Кто успел за это время — в одной партии, пустые места добирают боты. Восемь мест всегда.</p>
+                    <p>У комнаты свой чат и свой состав: видно, кто в ней стоит, а переписка в комнате не попадает в общий чат. Пока комната открыта, в чате есть переключатель «Общий / Комната».</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="tabFriends" class="pane">
+            <div class="scroller">
+                <form id="friendForm" class="inlineForm">
+                    <input id="friendNick" placeholder="Ник игрока" maxlength="16" autocomplete="off">
+                    <button type="submit">Добавить</button>
+                </form>
+                <div id="requestsIn" class="block"></div>
+                <div id="requestsOut" class="block"></div>
+                <div id="friendList" class="block"></div>
+            </div>
+        </section>
+    </div>
+
+    <footer class="chatFoot">
+        <div id="roomBar" class="roomBar hidden">
+            <span id="roomText"></span>
+            <span class="row">
+                <button id="roomStart" type="button" class="sm">Начать сейчас</button>
+                <button id="roomLeave" type="button" class="ghost sm">Выйти</button>
+            </span>
+        </div>
+        <button id="playBtn" type="button" class="play">Играть</button>
+    </footer>
+</div>
+
+<!-- === партия ========================================================== -->
+
+<div id="gameScreen" class="screen">
+    <canvas id="field"></canvas>
+
+    <div id="hud">
+        <span id="hudMe"></span>
+        <span id="hudStatus"></span>
+    </div>
+
+    <div id="panel">
+        <h1 id="panelTitle">Подключение…</h1>
+        <div id="panelSub"></div>
+        <div id="score" class="hidden"></div>
+        <ul id="feed"></ul>
+        <div class="row">
+            <button id="againBtn">Играть ещё</button>
+            <button id="chatBtn" class="ghost">В чат</button>
+        </div>
+    </div>
+
+    <div id="hint">
+        <kbd>WASD</kbd> или стрелки — ход · <kbd>Space</kbd> — <b>держать</b> толчок, чем дольше, тем сильнее ·
+        <kbd>Shift</kbd> — прыжок · <kbd>Q</kbd> — камень
+    </div>
+
+    <div id="touch">
+        <div id="stick"><div id="knob"></div></div>
+        <div id="buttons">
+            <button id="btnStone">КАМЕНЬ</button>
+            <button id="btnJump">ПРЫЖОК</button>
+            <button id="btnPush">ТОЛЧОК</button>
+        </div>
+    </div>
+</div>
+
+<div id="toasts"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/bundle.js"></script>
+<script src="/app.js"></script>
+<script src="/client.js"></script>
+</body>
+</html>

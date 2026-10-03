@@ -1,0 +1,16 @@
+{
+  "name": "arena",
+  "version": "0.1.0",
+  "description": "Арена на выталкивание: остаться на поле одному",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "test": "node test-arena.js && node test-play.js && node test-bot.js && node test-lobby.js && node test-accounts.js",
+    "view": "node tools/view.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "socket.io": "^4.8.4"
+  }
+}
