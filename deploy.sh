@@ -19,6 +19,13 @@ step() { echo; echo "=== $* ==="; }
 
 step "чистим то, что помешает pull"
 cd "$APP"
+# Эта директория — только приёмник деплоя, её руками никто не правит.
+# Всё, что в ней расходится сorigin, обязано уступить репозиторию: иначе
+# pull падает. Так и случилось после первого прогона, когда chmod +x
+# отметил deploy.sh как изменённый — git отказался его обновлять.
+git checkout -- .
+git reset --hard origin/master
+
 for f in $(git ls-files --others --exclude-standard); do
     echo "удаляю лишний untracked: $f"
     rm -f "$f"
