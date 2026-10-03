@@ -723,9 +723,20 @@
 
 <div id="toasts"></div>
 
-<script src="/socket.io/socket.io.js"></script>
-<script src="/bundle.js"></script>
-<script src="/app.js"></script>
-<script src="/client.js"></script>
+<!--
+    Пути к скриптам **относительные**, и это не вкусовое решение.
+    Арена может лежать не в корне домена, а по своему пути — /arena/
+    рядом с другой игрой. Абсолютный /bundle.js оттуда попал бы в корень
+    и обслуживался чужой игрой: страница арены грузила чужие скрипты,
+    а те отдавали 404. Относительный путь считается от адреса страницы
+    и работает и в корне, и в подкаталоге.
+
+    Путь сокета socket.io клиент берёт из адреса страницы сам, см. BASE
+    в public/app.js.
+-->
+<script src="socket.io/socket.io.js"></script>
+<script src="bundle.js"></script>
+<script src="app.js"></script>
+<script src="client.js"></script>
 </body>
 </html>
