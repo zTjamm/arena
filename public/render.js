@@ -182,7 +182,7 @@ function facing(p) {
  * превратились бы в кашу, а учиться надо на своём.
  * На откате дуги гаснут — заодно видно, что бить пока нельзя.
  */
-function drawAim(ctx, view, sx, sy, p, ready) {
+function drawAim(ctx, view, sx, sy, p, ready, lock) {
     const { fx, fy } = facing(p);
     const angle = Math.atan2(fy, fx);
     const half = Math.acos(T.PUSH_COS);        // половина конуса удара
@@ -193,8 +193,34 @@ function drawAim(ctx, view, sx, sy, p, ready) {
     // ровно одно расстояние, а значит и рисовать незачем.
     const flight = T.PUSH_DIST * s;
 
+    // Цвет досягаемости отвечает на вопрос «попаду или нет», и во
+    // время замаха это единственный честный источник ответа: стоя на
+    // месте целую секунду, игрок иначе гадает, успел он навестись или
+    // нет.
+    //
+    //   * можно бить, но цели нет — синий, обычный вид;
+    //   * замах и кто-то под ударом — зелёный, веер горит;
+    //   * замах и под ударом камень — янтарный: попадёт, но отскочит;
+    //   * замах и никого — тускло-красный: секунда стоит впустую.
+    const swinging = (p.swing || 0) > 0;
+    let edge = '#7fd0ff';
+    let alpha = ready ? 1 : 0.35;
+
+    if (swinging) {
+        if (!lock) {
+            edge = '#ff8080';
+            alpha = 0.75;
+        } else if (lock.stone) {
+            edge = '#ffc46b';
+            alpha = 1;
+        } else {
+            edge = '#7bff9e';
+            alpha = 1;
+        }
+    }
+
     ctx.save();
-    ctx.globalAlpha = ready ? 1 : 0.35;
+    ctx.globalAlpha = alpha;
 
     // Дальний край полёта: пунктир и пожиже цветом — это не граница
     // удара, а точка, куда соперник в конце концов приземлится.
@@ -225,12 +251,120 @@ function drawAim(ctx, view, sx, sy, p, ready) {
     ctx.stroke();
 
     // Досягаемость: главное, что нужно видеть перед ударом.
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = '#7fd0ff';
+    ctx.lineWidth = swinging ? 3.5 : 2.5;
+    ctx.strokeStyle = edge;
     ctx.beginPath();
     ctx.arc(sx, sy, reach, angle - half, angle + half);
     ctx.stroke();
 
+    // Под замахом веер заливается: сплошной конус читается как
+    // «сюда придётся удар», а не как «сюда можно достать».
+    if (swinging) {
+        ctx.globalAlpha = alpha * 0.16;
+        ctx.fillStyle = edge;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.arc(sx, sy, reach, angle - half, angle + half);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    ctx.restore();
+}
+
+/**
+ * Кто попал бы под удар, если бы он вышел **сейчас**.
+ *
+ * Повторяет выбор цели из ядра: ближайший в конусе на расстоянии
+ * `PUSH_RANGE`, кроме летящих, прыгающих и мёртвых. Считается на
+ * клиенте из снимка, а не приходит с сервера, — потому что должно
+ * обновляться каждый кадр: нос доворачивается, соперник уходит, и
+ * ответ меняется на глазах.
+ *
+ * Это предсказание, а не обещание: за оставшуюся секунду замаха
+ * соперник сдвинется. Показывается оно именно поэтому — видно, куда
+ * вести нос прямо сейчас.
+ *
+ * Камень не пропускается: удар в него отскакивает, и это тоже надо
+ * показать, причём другим цветом.
+ */
+function hitScan(snap, p) {
+    const angle = Math.atan2(p.diry || 0, p.dirx || 0);
+    if (!p.dirx && !p.diry) return null;
+
+    const half = Math.acos(T.PUSH_COS);
+    let target = null;
+    let nearest = Infinity;
+
+    for (const o of snap.players) {
+        if (o.id === p.id || !o.alive) continue;
+        if (o.fly > 0 || o.jumpLeft > 0) continue;
+
+        const dx = o.x - p.x;
+        const dy = o.y - p.y;
+        const d = Math.hypot(dx, dy);
+        if (d > T.PUSH_RANGE || d >= nearest) continue;
+
+        // Совпавшие центры: направление не определено, но удар
+        // достаёт — столько же считает и ядро.
+        if (d > 1e-9) {
+            let diff = Math.atan2(dy, dx) - angle;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            if (Math.abs(diff) > half) continue;
+        }
+
+        nearest = d;
+        target = o;
+    }
+
+    if (!target) return null;
+    return { id: target.id, stone: target.stone > 0 };
+}
+
+/**
+ * Метка на цели, которую замах накроет.
+ *
+ * Четыре угловые скобки, сходящиеся к цели, и перекрестье. Нарисовано
+ * поверх всех героев: важно, чтобы метка не пряталась под свалкой.
+ */
+function drawLockMark(ctx, view, snap, lock, now) {
+    const p = snap.players.find(q => q.id === lock.id);
+    if (!p) return;
+
+    const x = view.cx + p.x * view.scale;
+    const y = view.cy + p.y * view.scale;
+    const r = T.PLAYER_RADIUS * view.scale;
+
+    // Скобки дышат: метка не должна выглядеть частью героя, но и
+    // мигать не должна — спокойное пульсирование в полтора раза.
+    const k = 1 + 0.14 * Math.sin(now / 140);
+    const gap = Math.max(6, r * 0.55 * k);
+    const arm = Math.max(4, r * 0.45 * k);
+    const d = r * 1.5 * k;
+
+    ctx.save();
+    ctx.strokeStyle = lock.stone ? '#ffc46b' : '#7bff9e';
+    ctx.lineWidth = Math.max(2, r * 0.14);
+    ctx.lineCap = 'round';
+
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        ctx.beginPath();
+        ctx.moveTo(x + sx * d, y + sy * (d - gap));
+        ctx.lineTo(x + sx * d, y + sy * d);
+        ctx.lineTo(x + sx * (d - gap), y + sy * d);
+        ctx.stroke();
+    }
+
+    // Перекрестье в центре: видно, что прицел сведён именно на этого.
+    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = Math.max(1, r * 0.08);
+    ctx.beginPath();
+    ctx.moveTo(x - arm * 0.7, y);
+    ctx.lineTo(x + arm * 0.7, y);
+    ctx.moveTo(x, y - arm * 0.7);
+    ctx.lineTo(x, y + arm * 0.7);
+    ctx.stroke();
     ctx.restore();
 }
 
@@ -324,7 +458,8 @@ function starPath(ctx, cx, cy, r, inner) {
  *   * **летит** — белое тело и пунктирное кольцо, управлять нельзя;
  *   * **прыгает** — шлейф и каменная неуязвимость, вынести нельзя;
  *   * **камень** — приземистый серый шар, от удара отскакивает;
- *   * **заряжает толчок** — цифра ступени над головой.
+ *   * **замахивается** — сжимающееся кольцо и веер, подсвеченный
+ *     по тому, есть кто под ударом.
  */
 function drawPlayer(ctx, snap, view, p, index, opts) {
     const color = colorOf(index);
@@ -339,12 +474,12 @@ function drawPlayer(ctx, snap, view, p, index, opts) {
     const swinging = p.swing > 0;
 
     if (opts.me != null && p.id === opts.me) {
-        // Во время обратного отсчёта прицел гаснет: бить всё равно
-        // нельзя, и обещать досягаемость, которой сейчас нет, было бы
-        // враньём. Замах при этом не берётся — гасить надо и его.
+        // На отсчёте прицел гаснет: бить всё равно нельзя, и обещать
+        // досягаемость, которой сейчас нет, было бы враньём.
         const grace = snap.elapsed < T.SPAWN_GRACE;
         drawAim(ctx, view, sx, sy, p,
-            p.cooldowns.push <= 0 && !flying && !stoned && !swinging && !grace);
+            p.cooldowns.push <= 0 && !flying && !stoned && !swinging && !grace,
+            swinging ? (opts.lock || null) : null);
     }
 
     // Шлейф прыжка — три затухающих пятна позади по вектору полёта.
@@ -724,7 +859,7 @@ function drawBurstFx(ctx, view, fx, now) {
 }
 
 /**
- * Полный кадр: фон, поле, выбывшие, живые, затем эффекты поверх.
+ * Полный кадр: фон, поле, выбывшие, живые, метка цели, затем эффекты.
  *
  * opts.labels  — подписи имён под игроками;
  * opts.margin  — число остатка до края (диагностика);
@@ -742,12 +877,34 @@ function draw(ctx, snap, view, opts = {}) {
 
     drawField(ctx, snap, view);
 
+    // Кто под ударом — считается здесь, до рисования героев: и веер,
+    // и метка на цели должны смотреться из одного и того же расчёта,
+    // иначе метка укажет не на того, кого накрывает веер.
+    //
+    // Считается только пока идёт замах: вне замаха прицел и так
+    // показывает досягаемость, а пересчитывать конус шестьдесят раз
+    // в секунду ради картинки, которой никто не смотрит, незачем.
+    let lock = null;
+    if (opts.me != null) {
+        const me = snap.players.find(p => p.id === opts.me);
+        if (me && me.alive && me.swing > 0) lock = hitScan(snap, me);
+    }
+
     snap.players.forEach((p, index) => {
         if (!p.alive) drawGhost(ctx, snap, view, p, index);
     });
+
+    // Тот же расчёт уходит в drawPlayer: веер подсвечивается по
+    // наличию цели, а не по чему-то отдельному.
+    const pass = lock ? Object.assign({}, opts, { lock }) : opts;
+
     snap.players.forEach((p, index) => {
-        if (p.alive) drawPlayer(ctx, snap, view, p, index, opts);
+        if (p.alive) drawPlayer(ctx, snap, view, p, index, pass);
     });
+
+    // Метка поверх всех героев: в свалке из восьми человек она иначе
+    // уезжала бы под того, кто нарисован последним.
+    if (lock) drawLockMark(ctx, view, snap, lock, performance.now());
 
     if (opts.effects && opts.effects.length) {
         const now = performance.now();
