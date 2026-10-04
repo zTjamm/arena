@@ -235,8 +235,14 @@
         stickMove(e);
     }
 
-    const screen = document.getElementById('gameScreen');
-    if (screen) screen.addEventListener('pointerdown', maybeGrabStick);
+    // Имя **обязательно** не `screen`: глобальный `screen` — это объект
+    // Screen с `orientation`, и он нужен захвату ориентации. Своё
+    // `const screen` затенило бы его на весь модуль, и `lockSupported()`
+    // стал бы брать `orientation` у div-элемента, получать `undefined`
+    // и молча уходить в 'unsupported' — то есть полный экран и поворот
+    // переставали бы работать вообще, без всякой ошибки.
+    const stickHost = document.getElementById('gameScreen');
+    if (stickHost) stickHost.addEventListener('pointerdown', maybeGrabStick);
 
     stickEl.addEventListener('pointerdown', (e) => {
         e.preventDefault();
@@ -464,10 +470,27 @@
         if (field) field.style.visibility = on ? 'hidden' : '';
     }
 
-    // Уже пробовали захватить ориентацию? Повторные попытки без жеста
-    // пользователя только сыпят отказами.
-    let lockTried = false;
-    let lockResult = null;       // 'locked' | 'unsupported' | 'failed'
+    // Итог последней попытки: 'locked' | 'failed' | 'unsupported'.
+    let lockResult = null;
+
+    // Попытка уже идёт. Это защита от **гонки**, а не от повторов:
+    // раньше здесь стоял постоянный `lockTried`, который запрещал
+    // захват навсегда после первой попытки — и кнопка «на весь экран»
+    // становилась мёртвой: она звала тот же `tryLockLandscape`, тот
+    // видел флаг и молча выходил. Второй тап по заслонке не помогал по
+    // той же причине.
+    //
+    // Повторять попытку надо: первый вызов отклоняется, если страница
+    // была в фоне, жест не успел или устройство не дало, — а второй
+    // тап уже идёт из чистого состояния и проходит.
+    let lockBusy = false;
+    let lockTimer = null;
+
+    // Сколько ждать ответа браузера, прежде чем признать попытку
+    // неудавшейся. Запас большой: полный экран на телефоне открывается
+    // с заметной задержкой, и торопить тут нельзя — важно лишь
+    // перестать ждать насовсем.
+    const T_LOCK_TIMEOUT = 2500;
 
     /**
      * Браузер вообще умеет захват ориентации?
@@ -490,33 +513,48 @@
      * экран, и lock требуют жеста пользователя, и через await или
      * ответ сервера жест уже истёк — попытка молча провалится.
      *
-     * Поэтому захват висит на кнопке «Играть»: это и есть жест, и
-     * второго тапа по заслонке не требуется.
+     * Повторять можно: зовётся с кнопки «Играть», с кнопки «на весь
+     * экран» и с заслонки, и все три вызова — настоящие жесты.
      */
     function tryLockLandscape() {
-        if (lockTried) return Promise.resolve(lockResult);
-        lockTried = true;
+        if (lockBusy) return Promise.resolve(lockResult);
+        lockBusy = true;
 
-        if (!lockSupported()) {
-            lockResult = 'unsupported';
-            return Promise.resolve(lockResult);
-        }
+        // Страховка от залипания. `requestFullscreen` и `lock` обязаны
+        // либо resolve, либо reject, но если промис всё-таки не
+        // разрешится (браузер ждёт жест, которого не будет, или
+        // страница уснула), `done()` не вызовется — и без этого
+        // таймера `lockBusy` останется true навсегда. Залипший флаг
+        // убивает полный экран так же надёжно, как убивал прежний
+        // постоянный `lockTried`: кнопка перестаёт работать, и
+        // разбудить её уже нечем.
+        clearTimeout(lockTimer);
+        lockTimer = setTimeout(() => {
+            if (!lockBusy) return;
+            lockBusy = false;
+            lockResult = 'failed';
+            updateFsBtn();
+        }, T_LOCK_TIMEOUT);
+
+        const done = (result) => {
+            clearTimeout(lockTimer);
+            lockResult = result;
+            lockBusy = false;
+            updateFsBtn();
+            return result;
+        };
+
+        if (!lockSupported()) return Promise.resolve(done('unsupported'));
 
         const target = screen.orientation;
 
         // Полный экран — обязательное условие: без него lock
         // отклоняется почти всегда.
         const go = () => Promise.resolve(target.lock('landscape'))
-            .then(() => {
-                lockResult = 'locked';
-                return lockResult;
-            })
-            .catch(() => {
-                lockResult = 'failed';
-                return lockResult;
-            });
+            .then(() => done('locked'))
+            .catch(() => done('failed'));
 
-        if (document.fullscreenElement) return go();
+        if (inFullscreen()) return go();
 
         const el = document.documentElement;
         const req = el.requestFullscreen
@@ -577,6 +615,24 @@
         if (!fsBtn) return;
         fsBtn.classList.toggle('hidden',
             !active || inFullscreen() || !fullscreenSupported());
+    }
+
+    /**
+     * Выйти из полного экрана.
+     *
+     * Без этого уход в чат оставляет человека в полноэкранном режиме
+     * посреди списка онлайна: панели браузера нет, а игры уже нет —
+     * выглядит как сломавшаяся страница. Вызывается по жесту, потому
+     * что `exitFullscreen` без жеста не проходит.
+     */
+    function exitFullscreen() {
+        const doc = document;
+        const exit = doc.exitFullscreen
+            || doc.webkitExitFullscreen
+            || doc.msExitFullscreen;
+        if (!exit) return;
+        try { Promise.resolve(exit.call(doc)).catch(() => { /* не даёт */ }); }
+        catch (_) { /* не даёт — не страшно */ }
     }
 
     if (fsBtn) fsBtn.addEventListener('click', tryLockLandscape);
@@ -672,9 +728,11 @@ setInterval(() => {
     document.getElementById('againBtn').addEventListener('click', () => App.play());
     document.getElementById('chatBtn').addEventListener('click', () => {
         // Уход в чат — партия кончилась, и кнопка разворачивания на
-        // весь экран тут же лишняя.
+        // весь экран тут же лишняя. Полный экран тоже отпускаем: в чате
+        // он выглядит как сломавшаяся страница.
         active = false;
         updateFsBtn();
+        exitFullscreen();
         App.toChat();
     });
 
