@@ -200,6 +200,90 @@
         border-bottom: 1px solid var(--line);
     }
 
+    /* Список онлайна — постоянная левая колонка чата. Именно постоянная:
+       по требованию он виден всем и всегда, а не по кнопке. Поэтому он
+       не прячется и на узком экране — на телефоне просто уже. */
+    .chatRow { display: flex; flex: 1 1 auto; min-height: 0; }
+
+    .onlinePane {
+        flex: none;
+        width: 124px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-right: 1px solid var(--line);
+        background: rgba(9, 13, 22, 0.5);
+    }
+
+    .onlineHead {
+        flex: none;
+        padding: 9px 10px 7px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--faint);
+        border-bottom: 1px solid var(--line);
+    }
+
+    .onlineHead b { color: var(--dim); font-size: 11.5px; }
+
+    .onlineList {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 6px 0 10px;
+    }
+
+    /* Строка онлайна: точка состояния, ник. Свой ник выделяется —
+       иначе в списке из двадцати человек себя не найти. */
+    .onRow {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 6px 10px;
+        font-size: 12.5px;
+        color: var(--dim);
+        word-break: break-word;
+    }
+
+    .onDot {
+        flex: none;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--faint);
+    }
+
+    .onRow[data-s="game"] .onDot { background: var(--good); }
+    .onRow[data-s="room"] .onDot { background: var(--accent); }
+    .onRow[data-s="chat"] .onDot { background: rgba(232, 240, 255, 0.45); }
+
+    .onRow.me { color: var(--ink); font-weight: 700; }
+
+    .onEmpty {
+        padding: 10px;
+        font-size: 12px;
+        color: var(--faint);
+        font-style: italic;
+    }
+
+    .chatCol {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    /* На совсем узком экране колонка сжимается до точки и ника, иначе
+       сообщениям остаётся меньше половины ширины. */
+    @media (max-width: 430px) {
+        .onlinePane { width: 92px; }
+        .onRow { font-size: 11.5px; padding: 5px 7px; gap: 5px; }
+    }
+
     .chip {
         font-size: 13px;
         font-weight: 600;
@@ -656,16 +740,24 @@
 
     <div class="tabBody">
         <section id="tabChat" class="pane on">
-            <div id="chanBar" class="chanBar hidden">
-                <button type="button" class="chan on" data-chan="global">Общий</button>
-                <button type="button" class="chan" data-chan="room">Комната<span id="roomBadge" class="badge hidden">0</span></button>
+            <div class="chatRow">
+                <aside class="onlinePane">
+                    <div class="onlineHead">Онлайн <b id="onlineCount">0</b></div>
+                    <div id="onlineList" class="onlineList"></div>
+                </aside>
+                <div class="chatCol">
+                    <div id="chanBar" class="chanBar hidden">
+                        <button type="button" class="chan on" data-chan="global">Общий</button>
+                        <button type="button" class="chan" data-chan="room">Комната<span id="roomBadge" class="badge hidden">0</span></button>
+                    </div>
+                    <div id="roomSlots" class="slots hidden"></div>
+                    <div id="messages" class="messages"></div>
+                    <form id="chatForm" class="chatInput">
+                        <input id="chatInput" placeholder="Сообщение" maxlength="300" autocomplete="off">
+                        <button type="submit">→</button>
+                    </form>
+                </div>
             </div>
-            <div id="roomSlots" class="slots hidden"></div>
-            <div id="messages" class="messages"></div>
-            <form id="chatForm" class="chatInput">
-                <input id="chatInput" placeholder="Сообщение" maxlength="300" autocomplete="off">
-                <button type="submit">→</button>
-            </form>
         </section>
 
         <section id="tabRating" class="pane">
@@ -684,17 +776,20 @@
                     <p>На ПК — <span class="kbd">WASD</span> или стрелки, на телефоне — виртуальный джойстик слева.</p>
                     <p>Обычное столкновение просто разводит круги — ни толчка, ни оглушения.</p>
 
-                    <h3>Толчок: держи и отпускай</h3>
-                    <p><span class="kbd">Space</span> или кнопка ТОЛЧОК. <b>Держите кнопку</b>: пока держите, копится заряд, и цифра над вашим героем показывает ступень. 1 секунда — 100 единиц отлёта, 2 — 200, 3 и больше — 300. <b>Удар уходит при отпускании.</b></p>
-                    <p>Откат 3 секунды на все ступени. Отпустите раньше секунды — удара не будет, откат не потратится.</p>
-                    <p>Бьётся только <b>ближайший</b> в конусе перед носиком. Если он влетел в другого — тот отлетит на половину удара, а первый остановится. Цепочка работает сама.</p>
-                    <p>Перед вами рисуются две дуги: яркая — досягаемость, пунктирная — как далеко отлетит соперник при текущем заряде. Она растёт вместе с цифрой.</p>
+                    <h3>Толчок: нажал — прицелись — ударило</h3>
+                    <p><span class="kbd">Space</span> или кнопка ТОЛЧОК. Нажали — герой <b>замирает на секунду</b>, потом удар уходит сам, по направлению носа и всегда на <b>300 единиц</b>. Силы выбирать нечем.</p>
+                    <p>Кнопку отпускать незачем: замах от отпускания не отменяется. За секунду неподвижности можно спокойно довернуть нос — за это время он доворачивается на 126°.</p>
+                    <p>Откат <b>2 секунды от нажатия</b>. Полный цикл: секунда стою, удар, секунда живу.</p>
+                    <p>Пока идёт замах, веер отвечает, попадёт ли: <span style="color:#7bff9e">зелёный</span> — кто-то под ударом, <span style="color:#ffc46b">жёлтый</span> — под ударом камень, <span style="color:#ff8080">красный</span> — никого. А на цели, которую накроет, появляется рамка. Это про «если я не дособеру нос» — за оставшуюся секунду соперник тоже сдвинется.</p>
+                    <p>Бьётся только <b>ближайший</b> в конусе перед носиком, на расстоянии 200. Толпу толчком не выбить. Если он влетел в другого — тот отлетит на <b>две трети</b> удара, а первый остановится. Цепочка работает сама, и её длина показывается счётом.</p>
 
                     <h3>Прыжок</h3>
                     <p><span class="kbd">Shift</span> или кнопка ПРЫЖОК. Откат 5 секунд. Прыжок ровно на 300 единиц, и всё это время вы <b>неуязвимы</b>: толчок вас не выбьет, а за край вы не улетите.</p>
 
                     <h3>Камень</h3>
-                    <p><span class="kbd">Q</span> или кнопка КАМЕНЬ. Откат 7 секунд. На 2 секунды вы превращаетесь в камень: неподвижны, и удар от вас <b>отскакивает</b> — бьющий отлетает на половину своего удара.</p>
+                    <p><span class="kbd">Q</span> или кнопка КАМЕНЬ. Откат 7 секунд. На <b>1.3 секунды</b> вы превращаетесь в камень: абсолютно неподвижны, и удар от вас <b>отскакивает</b> — бьющего отбрасывает на все 300, столько же, сколько он ударил.</p>
+                    <p>Когда камень заканчивается, вокруг него происходит <b>взрыв</b>: всех в радиусе 240 разносит прочь на 150. Это единственный способ выгнать толпу сразу — толчок бьёт только одного.</p>
+                    <p>Осторожно: если у вас осталось меньше 300 единиц до края, вас можно выбить, не ломая защиту — достаточно ударить в камень с внутренней стороны.</p>
 
                     <h3>Перезарядки</h3>
                     <p>Над каждым героем три звезды: синяя — толчок, золотая — прыжок, коричневая — камень. Звезда заполняется снизу вверх, а когда скилл готов — мигает.</p>
@@ -705,6 +800,7 @@
                     <h3>Подбор</h3>
                     <p>Кнопка «Играть» открывает комнату на 30 секунд. Кто успел за это время — в одной партии, пустые места добирают боты. Восемь мест всегда.</p>
                     <p>У комнаты свой чат и свой состав: видно, кто в ней стоит, а переписка в комнате не попадает в общий чат. Пока комната открыта, в чате есть переключатель «Общий / Комната».</p>
+                    <p>Слева в чате всегда стоит список тех, кто онлайн. Точка показывает, чем человек занят: зелёная — играет, синяя — ждёт комнату, серая — просто в чате.</p>
                 </div>
             </div>
         </section>

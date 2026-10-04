@@ -48,6 +48,10 @@
 
     let me = null;                 // { nick, rating, games, wins }
     let lobby = { waiting: [], startsIn: null, running: false, players: null };
+
+    // Все, кто онлайн: [{ nick, status }]. Сервер сортирует сам — по
+    // занятости, играющие наверху.
+    let online = [];
     let friends = { friends: [], requestsIn: [], requestsOut: [] };
     let rating = [];
     const messages = [];           // общий чат
@@ -179,6 +183,7 @@
 
         if (msg.loggedOut) {
             me = null;
+            online = [];
             clearToken();
             show('auth');
             return;
@@ -197,6 +202,7 @@
         renderMessages();
         renderRating();
         renderRoom();
+        renderOnline();
     }
 
     // --- чат --------------------------------------------------------------
@@ -284,6 +290,47 @@
         el('roomBadge').classList.toggle('hidden', roomUnread <= 0 || channel === 'room');
 
         if (showRoom) renderSlots();
+    }
+
+    /**
+     * Список тех, кто онлайн. Приходит целиком и перерисовывается
+     * каждый раз, а не дописывается по событиям: подписчиков на
+     * «вошёл»/«вышел» у списка нет, он приходит одной рассылкой, и
+     * это надёжнее — нельзя потерять изменение и остаться с чужим
+     * ником в списке.
+     */
+    socket.on('arena:online', (rows) => {
+        online = Array.isArray(rows) ? rows : [];
+        renderOnline();
+    });
+
+    /**
+     * Левая колонка: точка состояния и ник.
+     *
+     * Порядок задаёт сервер — по занятости, играющие наверху. Свой ник
+     * выделяется жирным: в списке из двадцати человек себя иначе
+     * приходится искать глазами.
+     */
+    function renderOnline() {
+        el('onlineCount').textContent = String(online.length);
+
+        if (!online.length) {
+            el('onlineList').innerHTML =
+                '<div class="onEmpty">никого, кроме вас</div>';
+            return;
+        }
+
+        el('onlineList').innerHTML = online.map(r => {
+            const mine = me && r.nick === me.nick;
+            const title = r.status === 'game' ? 'играет'
+                : r.status === 'room' ? 'ждёт комнату'
+                : 'в чате';
+            return '<div class="onRow' + (mine ? ' me' : '') + '"'
+                + ' data-s="' + esc(r.status) + '"'
+                + ' title="' + esc(title) + '">'
+                + '<span class="onDot"></span><span>' + esc(r.nick) + '</span>'
+                + '</div>';
+        }).join('');
     }
 
     /** Состав комнаты: кто встал и сколько мест достанется ботам. */

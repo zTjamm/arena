@@ -107,6 +107,7 @@ function joinRoom(socket, nick, now) {
     lobby.join(nick, now);
     if (fresh && lobby.size > 0) roomChat.length = 0;
     broadcastLobby();
+    broadcastOnline();
     socket.emit('room:history', roomChat);
 }
 
@@ -183,6 +184,7 @@ function startMatch(now) {
     console.log(`[arena] партия ${matchSeq}: ${plan.humans.length} живых + `
         + `${plan.bots.length} ботов = ${plan.size}`);
     broadcastLobby();
+    broadcastOnline();
     broadcastFriends();
     return true;
 }
@@ -229,6 +231,7 @@ function endMatch(now) {
     emitAll('rating:list', accounts.rating());
     broadcastFriends();
     broadcastLobby();
+    broadcastOnline();
 }
 
 /** Снять подключение с партии: тело остаётся на поле и замирает. */
@@ -262,6 +265,37 @@ function broadcastFriends() {
     for (const [id, nick] of session) {
         io.to(id).emit('friends:state', accounts.friendsState(nick, presence));
     }
+}
+
+/**
+ * Кто сейчас онлайн: ник и его состояние.
+ *
+ * Список идёт всем вошедшим, а не друзьям: по требованию это постоянная
+ * левая колонка в чате, и она должна быть одинаковой у всех, иначе
+ * «кто онлайн» означало бы разное для разных людей и перестаёт быть
+ * списком онлайна.
+ *
+ * Порядок — по занятости, а не по нику: играющие наверху, потому что
+ * их ищут в первую очередь, ждущие комнату — следом, сидящие в чате —
+ * внизу. Внутри группы по нику, чтобы список не прыгал при каждой
+ * рассылке.
+ */
+function onlineState() {
+    const rows = [];
+    for (const nick of byNick.keys()) {
+        rows.push({ nick, status: presence(nick) });
+    }
+    const rank = { game: 0, room: 1, chat: 2 };
+    rows.sort((a, b) => {
+        const d = (rank[a.status] ?? 3) - (rank[b.status] ?? 3);
+        if (d) return d;
+        return a.nick.localeCompare(b.nick, 'ru');
+    });
+    return rows;
+}
+
+function broadcastOnline() {
+    emitAll('arena:online', onlineState());
 }
 
 // --- сессия ---------------------------------------------------------------
@@ -301,9 +335,11 @@ function enter(socket, user) {
     socket.emit('chat:history', chat);
     socket.emit('rating:list', accounts.rating());
     socket.emit('arena:lobby', lobbyState(Date.now()));
+    socket.emit('arena:online', onlineState());
     socket.emit('auth:done', { ok: true, me: user, token });
 
     broadcastFriends();
+    broadcastOnline();
 }
 
 /** Обработчик, требующий вошедшего аккаунта: чужие пакеты игнорируются. */
@@ -352,6 +388,7 @@ io.on('connection', (socket) => {
         socket.emit('auth:done', { ok: false, loggedOut: true });
         broadcastFriends();
         broadcastLobby();
+    broadcastOnline();
     });
 
     // У чата два канала. Общий видят все вошедшие, комнатный — только
@@ -433,12 +470,14 @@ io.on('connection', (socket) => {
         const now = Date.now();
         if (lobby.force(now)) startMatch(now);
         broadcastLobby();
+    broadcastOnline();
     }));
 
     socket.on('arena:leave', onAuthed(function (nick) {
         lobby.leave(nick);
         detachFromMatch(this);
         broadcastLobby();
+    broadcastOnline();
         broadcastFriends();
     }));
 
@@ -453,6 +492,7 @@ io.on('connection', (socket) => {
         detach(socket);
         broadcastFriends();
         broadcastLobby();
+        broadcastOnline();
     });
 });
 
