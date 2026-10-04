@@ -760,6 +760,7 @@ setInterval(() => {
                         x: e.x,
                         y: e.y,
                         radius: e.radius,
+                        hits: e.hits || [],
                         at: performance.now(),
                     });
                     while (bursts.length && performance.now() - bursts[0].at > 900) {

@@ -821,27 +821,73 @@ function drawChainFx(ctx, view, snap, fx, now) {
     ctx.restore();
 }
 
-/** Сколько живёт кольцо взрыва камня. */
+/** Сколько живёт анимация взрыва камня. */
 const BURST_FX_MS = 520;
 
+/** Сколько живёт удар по одной цели — он короче кольца. */
+const BURST_ARM_MS = 300;
+
 /**
- * Взрыв по истечении камня: расходящееся кольцо.
+ * Взрыв по истечении камня.
  *
- * Раньше камень был только щитом и показывать было нечего. Теперь в
- * конце он разносит всех вокруг, и это надо показать: по кольцу видно
- * границу, ради которой и стоило вставать в камень.
+ * Три слоя, и каждый отвечает на свой вопрос:
+ *
+ *   1. **Вспышка в точке взрыва** — камень только что лопнул. Без неё
+ *      кольцо появляется из ниоткуда.
+ *   2. **Расходящееся кольцо** — граница ударной волны, то есть ответ
+ *      на «кого вообще задело». По ней видно, ради чего стоило
+ *      встать в камень.
+ *   3. **Удар по каждой цели** — тот же язык, что и у толчка (рука
+ *      вылетает, упирается, возвращается), только каменного цвета.
+ *
+ * Третий слой — это то, чего не хватало. Раньше было одно кольцо, и
+ * жертва просто улетала: не было видно, что её ударил камень, а не
+ * что она сама отскочила от взрыва. Задело четверых — и видно, что
+ * четверых.
  */
-function drawBurstFx(ctx, view, fx, now) {
+function drawBurstFx(ctx, view, snap, fx, now) {
     const k = (now - fx.at) / BURST_FX_MS;
     if (!(k >= 0) || k >= 1) return;
 
     const x = view.cx + fx.x * view.scale;
     const y = view.cy + fx.y * view.scale;
     const full = fx.radius * view.scale;
+    const r = T.PLAYER_RADIUS * view.scale;
 
-    // Кольцо расходится наружу и одновременно гаснет: чем дальше,
-    // тем бледнее — край волны читается, а середина уже отработала.
     ctx.save();
+
+    // 1. Вспышка: короткий выброс наружу в самом начале.
+    if (k < 0.3) {
+        const f = 1 - k / 0.3;
+        const rad = r * (0.8 + f * 1.6);
+        const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+        g.addColorStop(0, 'rgba(255,240,210,' + (f * 0.75).toFixed(3) + ')');
+        g.addColorStop(1, 'rgba(255,240,210,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(x, y, rad, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // 3. Удар по каждой цели — рисуется первым, чтобы кольцо легло
+    // поверх и связало всё в одну волну.
+    const ka = Math.min(1, (now - fx.at) / BURST_ARM_MS);
+    if (ka < 1) {
+        for (const id of fx.hits || []) {
+            const p = snap.players.find(q => q.id === id);
+            if (!p) continue;
+
+            const dx = p.x - fx.x;
+            const dy = p.y - fx.y;
+            const d = Math.hypot(dx, dy);
+            if (d < 1e-6) continue;
+
+            drawHand(ctx, x, y, dx / d, dy / d, r, ka, '#d9b98a');
+        }
+    }
+
+    // 2. Кольцо расходится наружу и одновременно гаснет: чем дальше,
+    // тем бледнее — край волны читается, а середина уже отработала.
     ctx.globalAlpha = (1 - k) * 0.85;
     ctx.beginPath();
     ctx.arc(x, y, full * (0.25 + k * 0.85), 0, Math.PI * 2);
@@ -855,6 +901,7 @@ function drawBurstFx(ctx, view, fx, now) {
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = Math.max(1, 3 * (1 - k));
     ctx.stroke();
+
     ctx.restore();
 }
 
@@ -910,7 +957,7 @@ function draw(ctx, snap, view, opts = {}) {
         const now = performance.now();
         for (const fx of opts.effects) drawPushFx(ctx, view, snap, fx, now);
         for (const fx of opts.chains || []) drawChainFx(ctx, view, snap, fx, now);
-        for (const fx of opts.bursts || []) drawBurstFx(ctx, view, fx, now);
+        for (const fx of opts.bursts || []) drawBurstFx(ctx, view, snap, fx, now);
     }
 
     drawGrace(ctx, view, snap);

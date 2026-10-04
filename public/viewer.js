@@ -105,6 +105,7 @@
                     x: ev.x,
                     y: ev.y,
                     radius: ev.radius,
+                    hits: ev.hits || [],
                     at: performance.now(),
                 });
             }
