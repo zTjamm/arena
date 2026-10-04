@@ -156,4 +156,20 @@ function isMuted() {
     return muted;
 }
 
-module.exports = { sfx, unlock, setMuted, isMuted };
+/**
+ * Отдача. Телефон трясётся — это дешёвый и самый честный способ
+ * сказать «ты попал» и «тебя выбили», не глядя на экран.
+ *
+ * Короткая: длинная вибрация во время партии только мешает и ест
+ * батарею. Поддержка проверяется, потому что Safari её не имеет, а
+ * Firefox на Android игнорирует.
+ */
+function buzz(ms) {
+    if (muted) return;
+    if (typeof navigator === 'undefined' || !navigator.vibrate) return;
+    try {
+        navigator.vibrate(ms);
+    } catch (_) { /* устройство не даёт — не страшно */ }
+}
+
+module.exports = { sfx, unlock, setMuted, isMuted, buzz };

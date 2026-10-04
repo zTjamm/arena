@@ -176,7 +176,67 @@
         stick.x = 0;
         stick.y = 0;
         knobEl.style.transform = 'translate(0px, 0px)';
+        stickHome();
     }
+
+    // --- кружок догоняет палец -------------------------------------------
+
+    // Домашняя позиция кружка в покое. Меряется со сброшенным
+    // transform: `getBoundingClientRect` возвращает уже **сдвинутый**
+    // прямоугольник, и после первого же переезда домой вернуться было бы
+    // уже некуда.
+    let homeCX = 0;
+    let homeCY = 0;
+
+    function measureHome() {
+        stickEl.style.transform = '';
+        const r = stickEl.getBoundingClientRect();
+        homeCX = r.left + r.width / 2;
+        homeCY = r.top + r.height / 2;
+    }
+
+    function stickHome() {
+        stickEl.style.transform = '';
+    }
+
+    /**
+     * Кружок переезжает под палец.
+     *
+     * Фиксированный кружок в углу удобен, пока палец ложится на него
+     * сам. Но большой палец на телефоне в нижний левый угол не попадает
+     * без усилия — приходится тянуться и при этом не смотреть, куда,
+     * а в партии смотреть надо на поле. Поэтому кружок **догоняет палец**
+     * в левой части экрана и возвращается на место при отпускании.
+     *
+     * Двигается он через `transform`, а не `left/top`: кружок — элемент
+     * потока flex, и `position: absolute` выкинул бы его из вёрстки, а
+     * кнопки уехали бы влево. `transform` двигает картинку, не трогая
+     * раскладку.
+     */
+    function stickFollow(e) {
+        stickEl.style.transform =
+            'translate(' + (e.clientX - homeCX) + 'px, ' + (e.clientY - homeCY) + 'px)';
+    }
+
+    // Доля экрана слева, где кружок готов уехать под палец. Правее неё
+    // стоят кнопки скиллов, и кружок под ними встал бы прямо на толчок.
+    const GRAB_SIDE = 0.45;
+
+    function maybeGrabStick(e) {
+        if (stick.id != null) return;
+        if (e.clientX > window.innerWidth * GRAB_SIDE) return;
+        // Кнопка скилла важнее джойстика: под неё переезжать нельзя.
+        if (e.target && e.target.closest && e.target.closest('#buttons')) return;
+
+        e.preventDefault();
+        stickFollow(e);
+        try { stickEl.setPointerCapture(e.pointerId); } catch (_) { /* best effort */ }
+        stick.id = e.pointerId;
+        stickMove(e);
+    }
+
+    const screen = document.getElementById('gameScreen');
+    if (screen) screen.addEventListener('pointerdown', maybeGrabStick);
 
     stickEl.addEventListener('pointerdown', (e) => {
         e.preventDefault();
@@ -195,6 +255,14 @@
         if (e.pointerId === stick.id) stickReset();
     });
     stickEl.addEventListener('pointercancel', stickReset);
+
+    // Домашняя позиция меряется после того, как браузер посчитал вёрстку,
+    // и пересчитывается на каждом изменении размера окна: джойстик задан
+    // долями экрана, и при повороте он меняет размер.
+    measureHome();
+    window.addEventListener('resize', () => {
+        if (stick.id == null) measureHome();
+    });
 
     // Страховка от залипания джойстика — та же, что и у кнопок: если
     // захват указателя не сработал, палец уйдёт с кружка, и джойстик
@@ -851,6 +919,15 @@ setInterval(() => {
                     if (e.bounce) Sound.sfx.bounce();
                     else if (e.hits && e.hits.length) Sound.sfx.hit();
                     else Sound.sfx.whiff();
+
+                    // Отдача — только за **свой** удар. Чужие удары в
+                    // партии летят десятками, и вибрация на каждом
+                    // превращалась бы в сплошной треск, который за
+                    // свои попадания уже не слышно.
+                    if (e.by === you) {
+                        if (e.bounce) Sound.buzz(28);
+                        else if (e.hits && e.hits.length) Sound.buzz(18);
+                    }
                     continue;
                 }
 
@@ -869,7 +946,10 @@ setInterval(() => {
                     while (chains.length && performance.now() - chains[0].at > 2000) {
                         chains.shift();
                     }
-                    if (mine) Sound.sfx.chain(e.count);
+                    if (mine) {
+                        Sound.sfx.chain(e.count);
+                        Sound.buzz(20 + e.count * 6);
+                    }
                     continue;
                 }
 
@@ -887,6 +967,10 @@ setInterval(() => {
                     // Взрыв слышен всем: он и есть половина смысла
                     // камня, и пропускать его глухо нельзя.
                     Sound.sfx.burst();
+                    // Отдача — задело ли оно меня: если да, это самое
+                    // важное событие партии, и почувствовать его надо
+                    // спиной, а не только увидеть.
+                    if (e.hits && e.hits.indexOf(you) >= 0) Sound.buzz(45);
                     continue;
                 }
 
@@ -899,6 +983,8 @@ setInterval(() => {
                 feed.push({ id: e.id, by: e.by });
                 while (feed.length > 6) feed.shift();
                 Sound.sfx.out();
+                // Вынесли меня — самая длинная вибрация, какой есть.
+                if (e.id === you) Sound.buzz([40, 60, 40]);
             }
 
             if (snap.finished) finished = true;
