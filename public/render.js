@@ -434,6 +434,33 @@ function drawPlayer(ctx, snap, view, p, index, opts) {
             ctx.lineWidth = 2;
             ctx.stroke();
         }
+
+        // Свой герой подсвечивается ярче остальных.
+        //
+        // Восемь героев на поле, и телефон меньше: без подсветки
+        // «который тут мой» приходилось угадывать, особенно когда
+        // вокруг толпа и герои наезжают друг на друга. Три приёма
+        // вместе, ни один из них не меняет цвет самого героя —
+        // иначе перестаёшь отличать его от соседей:
+        //
+        //   * мягкое свечение наружу — виден даже в свалке;
+        //   * ровный белый контур по самому герою;
+        //   * подпись ником под героем, а не только у всех сразу.
+        if (opts.me != null && p.id === opts.me) {
+            const glow = ctx.createRadialGradient(0, 0, r * 0.7, 0, 0, r * 2.2);
+            glow.addColorStop(0, 'rgba(255,255,255,0.22)');
+            glow.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.beginPath();
+            ctx.arc(0, 0, r * 2.2, 0, Math.PI * 2);
+            ctx.fillStyle = glow;
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(0, 0, r + 3, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+            ctx.lineWidth = Math.max(2, r * 0.09);
+            ctx.stroke();
+        }
     }
 
     // Носик — куда игрок смотрит. Тонкий и светлый, чтобы не спорить
@@ -477,8 +504,13 @@ function drawPlayer(ctx, snap, view, p, index, opts) {
 function drawCharge(ctx, sx, sy, r, charge, ready) {
     if (!(charge > 0)) return;
 
-    const top = T.PUSH_TIERS.length;          // ступеней всего три
-    const frac = Math.min(charge / top, 1); // 0..1 на весь заряд
+    // Полный заряд берётся из ядра, а не вычисляется как «ступеней три,
+    // значит три секунды»: ступень теперь полсекунды, и полный заряд
+    // равен 1.5. Считать от количества ступеней было бы верно только
+    // при шаге в секунду — тогда кольцо показывало бы заряд меньше
+    // половины, когда он уже полный.
+    const full = T.PUSH_CHARGE_MAX;
+    const frac = Math.min(charge / full, 1); // 0..1 на весь заряд
     const ring = r + 6;
     const from = Math.PI / 2;                // низ круга
     const to = from - frac * Math.PI * 2;
@@ -493,12 +525,12 @@ function drawCharge(ctx, sx, sy, r, charge, ready) {
     ctx.lineWidth = Math.max(3, r * 0.22);
     ctx.stroke();
 
-    // Засечки на границах ступеней: 1 и 2 секунды.
+    // Засечки на границах ступеней: половина и одна секунда.
     ctx.lineCap = 'butt';
     ctx.strokeStyle = 'rgba(12,17,28,0.85)';
     ctx.lineWidth = Math.max(2, r * 0.14);
-    for (let i = 1; i < top; i++) {
-        const a = from - (i / top) * Math.PI * 2;
+    for (let i = 1; i < T.PUSH_TIERS.length; i++) {
+        const a = from - (i / T.PUSH_TIERS.length) * Math.PI * 2;
         ctx.beginPath();
         ctx.moveTo(sx + Math.cos(a) * (ring - r * 0.18),
             sy + Math.sin(a) * (ring - r * 0.18));
@@ -551,10 +583,22 @@ function drawCharge(ctx, sx, sy, r, charge, ready) {
     }
 
     if (opts.labels) {
-        ctx.font = '600 12px system-ui, -apple-system, sans-serif';
+        // Подпись под героем. Свой — заметно ярче и крупнее: на
+        // телефоне в свалке из восьми героев подписи одинакового
+        // размера сливаются, и «мой» не находится глазом.
+        const mine = opts.me != null && p.id === opts.me;
+        ctx.font = (mine ? '800 13px' : '600 11px')
+            + ' system-ui, -apple-system, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        ctx.fillStyle = 'rgba(232,240,255,0.9)';
+        if (mine) {
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(12,17,28,0.9)';
+            ctx.strokeText(p.id, sx, sy + r + 9);
+            ctx.fillStyle = '#ffffff';
+        } else {
+            ctx.fillStyle = 'rgba(232,240,255,0.55)';
+        }
         ctx.fillText(p.id, sx, sy + r + 9);
     }
 

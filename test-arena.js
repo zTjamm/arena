@@ -179,13 +179,17 @@ function flyOut(arena, id) {
 }
 
 {
-    // Три ступени: секунда удержания — 100 единиц отлёта, две — 200,
-    // три — 300. Отлёт задан расстоянием, а не импульсом, поэтому сходится
+    // Три ступени по полсекунды: 0.5 — 100 единиц отлёта, 1 — 200,
+    // 1.5 — 300. Отлёт задан расстоянием, а не импульсом, поэтому сходится
     // точно, а не «примерно как в прошлый раз».
-    for (const [ticks, want] of [[30, 100], [60, 200], [90, 300]]) {
+    //
+    // Цель стоит на 70: тела теперь радиусом 28, то есть
+    // соприкасаются на 56, и на старой тридцатке они перекрывались и
+    // расходились сами, пока копится заряд.
+    for (const [ticks, want] of [[15, 100], [30, 200], [45, 300]]) {
         const arena = createArena({ size: 3000 });
         addPlayer(arena, 'a', { x: 0, y: 0 });
-        addPlayer(arena, 'b', { x: 40, y: 0 });
+        addPlayer(arena, 'b', { x: 70, y: 0 });
         arena.players[0].dirx = 1;
 
         charged(arena, 'a', ticks);
@@ -198,28 +202,30 @@ function flyOut(arena, id) {
 }
 
 {
-    // Заряд не переполняется: три секунды удержания — это третья ступень,
-    // а не бесконечное накопление.
+    // Заряд не переполняется: полторы секунды удержания — это третья
+    // ступень, а не бесконечное накопление. Держать дольше незачем.
     const arena = createArena({ size: 3000 });
     addPlayer(arena, 'a', { x: 0, y: 0 });
     for (let i = 0; i < 90; i++) step(arena, { a: { push: true } });
 
-    check('заряд не переполняется', arena.players[0].charge <= 3 + 1e-6,
+    check('заряд не переполняется',
+        arena.players[0].charge <= T.PUSH_CHARGE_MAX + 1e-6,
         'заряд ' + arena.players[0].charge.toFixed(3));
-    check('заряд трёх секунд — третья ступень',
+    check('полный заряд — третья ступень',
         chargeTier(arena.players[0].charge) === 3,
         'ступень ' + chargeTier(arena.players[0].charge));
 }
 
 {
-    // Отпустил раньше секунды — удара не было и откат не потрачен.
-    // Иначе каждые полсекунды в партии был бы выстрел в пустоту.
+    // Отпустил раньше половины секунды — удара не было и откат не
+    // потрачен. Иначе каждые четверть секунды в партии был бы
+    // выстрел в пустоту.
     const arena = createArena({ size: 3000 });
     addPlayer(arena, 'a', { x: 0, y: 0 });
-    addPlayer(arena, 'b', { x: 40, y: 0 });
+    addPlayer(arena, 'b', { x: 70, y: 0 });
     arena.players[0].dirx = 1;
 
-    for (let i = 0; i < 15; i++) step(arena, { a: { push: true } });
+    for (let i = 0; i < 10; i++) step(arena, { a: { push: true } });
     step(arena, { a: { push: false } });
 
     check('короткое нажатие не бьёт', arena.players[1].fly === 0,
@@ -231,13 +237,18 @@ function flyOut(arena, id) {
 
 {
     // Бьётся только ближайший в конусе: толкнуть толпу нельзя.
+    //
+    // Расставка под новый радиус: тела соприкасаются на 56, поэтому
+    // «near» и «far» стоят в разных углах конуса, а не вдоль одной
+    // оси — иначе они перекрывались и расходились сами, пока копится
+    // заряд, и проверка мерила бы не удар, а разводку.
     const arena = createArena({ size: 3000 });
     addPlayer(arena, 'a', { x: 0, y: 0 });
-    addPlayer(arena, 'near', { x: 20, y: 0 });
-    addPlayer(arena, 'far', { x: T.PUSH_RANGE - 2, y: 0 });
+    addPlayer(arena, 'near', { x: 60, y: 0 });
+    addPlayer(arena, 'far', { x: 60, y: 80 });
     arena.players[0].dirx = 1;
 
-    const hit = charged(arena, 'a', 30).find(e => e.type === 'push');
+    const hit = charged(arena, 'a', 15).find(e => e.type === 'push');
 
     check('толчок бьёт одного', !!hit && hit.hits.length === 1,
         hit ? hit.hits.join(',') : 'нет события');
@@ -253,27 +264,33 @@ function flyOut(arena, id) {
     // получить свою половину и никого не догнал следующий.
     const arena = createArena({ size: 3000 });
     addPlayer(arena, 'a', { x: 0, y: 0 });
-    addPlayer(arena, 'b', { x: 40, y: 0 });
+    addPlayer(arena, 'b', { x: 70, y: 0 });
     addPlayer(arena, 'c', { x: 320, y: 0 });
     addPlayer(arena, 'd', { x: 480, y: 0 });
     arena.players[0].dirx = 1;
 
     const before = arena.players.map(p => p.x);
-    charged(arena, 'a', 90);
+    charged(arena, 'a', 45);
     for (let i = 0; i < 80; i++) step(arena, {});
 
     const flew = (id) => {
         const i = arena.players.findIndex(p => p.id === id);
         return arena.players[i].x - before[i];
     };
-    // что отличает цепочку от промаха: каждый следующий получил свою
+    // Что отличает цепочку от промаха: каждый следующий получил свою
     // половину удара, а не ноль.
+    //
+    // Полной половины (150) никто не пролетает: сила передаётся при
+    // соприкосновении, а тела теперь радиусом 28, то есть передача
+    // случается за 56 единиц до полёта, и следующий отдаёт силу
+    // дальше, не долетев конца. Проверяется поэтому не «ровно 150»,
+    // а «заметно далеко»: каждый в цепочке сдвинулся больше сотни.
     check('второй получил половину удара',
-        Math.abs(flew('c') - 150) < 20,
-        'c ' + flew('c').toFixed(0) + ' при 150');
+        flew('c') > 100,
+        'c ' + flew('c').toFixed(0) + ', половина удара 150');
     check('третий тоже получил половину удара',
-        Math.abs(flew('d') - 150) < 20,
-        'd ' + flew('d').toFixed(0) + ' при 150');
+        flew('d') > 100,
+        'd ' + flew('d').toFixed(0) + ', половина удара 150');
     check('первый в цепочке не пролетел весь удар',
         flew('b') < 300,
         'b ' + flew('b').toFixed(0) + ' при полном ударе 300');
@@ -283,13 +300,13 @@ function flyOut(arena, id) {
     // Камень: удар от него отскакивает, а не ломается о него.
     const arena = createArena({ size: 3000 });
     addPlayer(arena, 'a', { x: 0, y: 0 });
-    addPlayer(arena, 'b', { x: 40, y: 0 });
+    addPlayer(arena, 'b', { x: 70, y: 0 });
     arena.players[0].dirx = 1;
 
     step(arena, { b: { stone: true } });
-    // Секунда удержания — минимальная ступень. Камень держится две
+    // Полсекунды удержания — минимальная ступень. Камень держится две
     // секунды, поэтому заряд в него успевает уложиться.
-    for (let i = 0; i < 30; i++) step(arena, { a: { push: true } });
+    for (let i = 0; i < 15; i++) step(arena, { a: { push: true } });
     step(arena, { a: { push: false } });
 
     check('от камня отскакивает сам бьющий',
@@ -346,6 +363,10 @@ function flyOut(arena, id) {
 
 {
     // На откате заряд не копится: кнопку держать можно, удар не выйдет.
+    //
+    // Держим 50 тиков при откате в 60: запас меньше, иначе откат
+    // истёк бы внутри прогона и заряд начал копиться законно — раньше
+    // здесь стояло 80 тиков под прежний откат в три секунды.
     const arena = createArena({ size: 800 });
     addPlayer(arena, 'a', { x: 0, y: 0 });
     addPlayer(arena, 'b', { x: 30, y: 0 });
@@ -355,8 +376,7 @@ function flyOut(arena, id) {
         arena.players[0].cooldowns.push > T.PUSH_COOLDOWN - 0.1,
         'откат ' + arena.players[0].cooldowns.push.toFixed(2));
 
-    // истёк, и заряд начал бы копиться заново.
-    for (let i = 0; i < 80; i++) step(arena, { a: { push: true } });
+    for (let i = 0; i < 50; i++) step(arena, { a: { push: true } });
 
     check('на откате заряд не копится', arena.players[0].charge === 0,
         'заряд ' + arena.players[0].charge);
@@ -772,14 +792,14 @@ function longRun() {
 
 {
     // Событие приходит и при попадании, и при промахе: без промаха игрок
-    // не заметил бы, что три секунды готовил удар в пустоту.
+    // не заметил бы, что полторы секунды готовил удар в пустоту.
     const arena = createArena({ size: 3000 });
     addPlayer(arena, 'a', { x: 0, y: 0 });
-    addPlayer(arena, 'b', { x: 40, y: 0 });
+    addPlayer(arena, 'b', { x: 70, y: 0 });
     arena.players[0].dirx = 1;
     arena.players[0].diry = 0;
 
-    const hit = charged(arena, 'a', 60).find(e => e.type === 'push');
+    const hit = charged(arena, 'a', 30).find(e => e.type === 'push');
 
     check('удар отдаёт событие', !!hit);
     check('событие помнит направление',
