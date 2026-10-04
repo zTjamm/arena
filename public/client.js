@@ -451,14 +451,32 @@
         if (document.fullscreenElement) return go();
 
         const el = document.documentElement;
-        if (el.requestFullscreen) {
-            return Promise.resolve(el.requestFullscreen())
+        const req = el.requestFullscreen
+            || el.webkitRequestFullscreen
+            || el.msRequestFullscreen;
+        if (req) {
+            return Promise.resolve(req.call(el))
                 .then(go)
                 // Полный экран могли запретить — тогда хотя бы пробуем
                 // lock как есть.
                 .catch(go);
         }
         return go();
+    }
+
+    /**
+     * Полноэкранный режим вообще доступен?
+     *
+     * **Не на iPhone.** Safari на айфоне разрешает полный экран только
+     * видео, обычной странице — никогда, и ни `requestFullscreen`, ни
+     * `webkitRequestFullscreen` там не помогают. На iPad работает. Проверка
+     * по наличию метода, а не по имени устройства: так она честнее и не
+     * обманывает на новых версиях iOS.
+     */
+    function fullscreenSupported() {
+        const el = document.documentElement;
+        return !!(el.requestFullscreen || el.webkitRequestFullscreen
+            || el.msRequestFullscreen);
     }
 
     window.addEventListener('resize', updateRotateGate);
@@ -469,6 +487,34 @@
     // Заслонка поверх поля: нажатие на неё — запасной путь, если
     // захват на кнопке «Играть» не прошёл.
     rotateEl.addEventListener('pointerdown', tryLockLandscape);
+
+    /**
+     * Кнопка «на весь экран».
+     *
+     * Показывается только там, где полный экран возможен и ещё не
+     * включён. Повторная попытка нужна потому, что браузер иногда
+     * отклоняет первый вызов: жест успел истёть, страница была в
+     * фоне или Safari просто не дал. На iPhone кнопки нет вовсе —
+     * там она была бы обещанием, которое не выполняется.
+     */
+    const fsBtn = document.getElementById('fsBtn');
+
+    function inFullscreen() {
+        return !!(document.fullscreenElement
+            || document.webkitFullscreenElement
+            || document.msFullscreenElement);
+    }
+
+    function updateFsBtn() {
+        if (!fsBtn) return;
+        fsBtn.classList.toggle('hidden',
+            !active || inFullscreen() || !fullscreenSupported());
+    }
+
+    if (fsBtn) fsBtn.addEventListener('click', tryLockLandscape);
+    document.addEventListener('fullscreenchange', updateFsBtn);
+    document.addEventListener('webkitfullscreenchange', updateFsBtn);
+
     updateRotateGate();
 
     function readInput() {
@@ -556,7 +602,13 @@ setInterval(() => {
     const hudStatus = document.getElementById('hudStatus');
 
     document.getElementById('againBtn').addEventListener('click', () => App.play());
-    document.getElementById('chatBtn').addEventListener('click', () => App.toChat());
+    document.getElementById('chatBtn').addEventListener('click', () => {
+        // Уход в чат — партия кончилась, и кнопка разворачивания на
+        // весь экран тут же лишняя.
+        active = false;
+        updateFsBtn();
+        App.toChat();
+    });
 
     function findMe(snap) {
         if (!snap || !you) return null;
@@ -678,6 +730,8 @@ setInterval(() => {
             shouldRotate,
             get supported() { return lockSupported(); },
             get result() { return lockResult; },
+            get fullscreen() { return inFullscreen(); },
+            get fullscreenSupported() { return fullscreenSupported(); },
         },
     };
 
@@ -770,6 +824,7 @@ setInterval(() => {
             bursts.length = 0;
             lastSnap = null;
             resetShown();
+            updateFsBtn();
         },
 
         snapshot(snap) {
