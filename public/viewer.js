@@ -36,6 +36,8 @@
         feed: [],
         colors: Object.create(null),
         effects: [],
+        chains: [],
+        bursts: [],
         finishAt: 0,
     };
 
@@ -51,6 +53,8 @@
         state.finishAt = 0;
         state.colors = Object.create(null);
         state.effects = [];
+        state.chains = [];
+        state.bursts = [];
         arena.players.forEach((p, i) => {
             state.colors[p.id] = Render.colorOf(i);
         });
@@ -82,6 +86,29 @@
                     at: performance.now(),
                 });
             }
+
+            // Цепочка и взрыв показываются всем зрителям: в зрительской
+            // партии нет «моего» игрока, и счёт цепочки на экране —
+            // единственное, по чему видно, кто кого перетолкнул.
+            if (ev.type === 'chain') {
+                state.chains.push({
+                    by: ev.by,
+                    last: ev.last,
+                    count: ev.count,
+                    power: ev.power,
+                    mine: true,
+                    at: performance.now(),
+                });
+            }
+            if (ev.type === 'burst') {
+                state.bursts.push({
+                    x: ev.x,
+                    y: ev.y,
+                    radius: ev.radius,
+                    at: performance.now(),
+                });
+            }
+
             if (ev.type === 'eliminated') {
                 state.feed.unshift({ id: ev.id, by: ev.by, place: ev.place });
                 changed = true;
@@ -159,6 +186,12 @@
         while (state.effects.length && now - state.effects[0].at > Render.PUSH_FX_MS * 2) {
             state.effects.shift();
         }
+        while (state.chains.length && now - state.chains[0].at > 2000) {
+            state.chains.shift();
+        }
+        while (state.bursts.length && now - state.bursts[0].at > 900) {
+            state.bursts.shift();
+        }
 
         Render.draw(ctx, snap, view, {
             labels: true,
@@ -166,6 +199,8 @@
             pulse: now / 1000,
             spin: now / 1000,
             effects: state.effects,
+            chains: state.chains,
+            bursts: state.bursts,
         });
 
         const alive = snap.players.filter(p => p.alive).length;

@@ -20,6 +20,7 @@
     const { require: req } = window.ArenaBundle;
     const { T } = req('game/arena');
     const Render = req('public/render');
+    const Sound = req('public/sound');
 
     const App = window.App;
     const socket = App.socket;
@@ -32,6 +33,13 @@
          Держим чуть дольше, чем живёт сама анимация, — на случай
          пропущенного кадра, вычерпывает их кадр ниже. */
     const effects = [];
+
+    // Цепочки и взрывы камня живут отдельно от ударов: у них свой
+    // срок жизни и своя картинка. Удары показываются 260 мс, подпись
+    // цепочки едет вверх чуть больше секунды, кольцо взрыва гаснет за
+    // полсекунды.
+    const chains = [];
+    const bursts = [];
 
     // --- состояние --------------------------------------------------------
 
@@ -274,6 +282,16 @@
         document.body.classList.toggle('touch', touchMode);
     }
     applyControlMode();
+
+    // Звук разрешается только после жеста пользователя: браузеры
+    // блокируют AudioContext, пока пользователь не коснулся страницы,
+    // и без этого первый-же звук просто не прозвучит.
+    //
+    // Слушатель ставится один раз и снимается после первого срабатывания:
+    // `once` надёжнее ручной отписки — забыть снять невозможно.
+    const unlockSound = () => Sound.unlock();
+    window.addEventListener('pointerdown', unlockSound, { once: true });
+    window.addEventListener('keydown', unlockSound, { once: true });
 
     // --- поворот экрана ----------------------------------------------------
 
@@ -662,6 +680,8 @@ setInterval(() => {
                     spin: now / 1000,
                     me: you,
                     effects,
+                    chains,
+                    bursts,
                 });
             }
             updatePanel();
@@ -683,6 +703,8 @@ setInterval(() => {
             frames.length = 0;
             feed.length = 0;
             effects.length = 0;
+            chains.length = 0;
+            bursts.length = 0;
             lastSnap = null;
             resetShown();
         },
@@ -700,13 +722,64 @@ setInterval(() => {
                         dirx: e.dirx,
                         diry: e.diry,
                         hits: e.hits || [],
+                        bounce: e.bounce || null,
                         at: performance.now(),
                     });
+
+                    // Звук удара различается тремя случаями: попал,
+                    // влетел в камень, промахнулся. Раньше звука не
+                    // было вовсе, и все три были одинаково безразличны
+                    // — а это три совершенно разных исхода.
+                    if (e.bounce) Sound.sfx.bounce();
+                    else if (e.hits && e.hits.length) Sound.sfx.hit();
+                    else Sound.sfx.whiff();
                     continue;
                 }
+
+                // Цепочка доиграла — показываем счёт толкавшему и
+                // поднимаем тон на две ступени за звено.
+                if (e.type === 'chain') {
+                    const mine = e.by === you;
+                    chains.push({
+                        by: e.by,
+                        last: e.last,
+                        count: e.count,
+                        power: e.power,
+                        mine,
+                        at: performance.now(),
+                    });
+                    while (chains.length && performance.now() - chains[0].at > 2000) {
+                        chains.shift();
+                    }
+                    if (mine) Sound.sfx.chain(e.count);
+                    continue;
+                }
+
+                if (e.type === 'burst') {
+                    bursts.push({
+                        x: e.x,
+                        y: e.y,
+                        radius: e.radius,
+                        at: performance.now(),
+                    });
+                    while (bursts.length && performance.now() - bursts[0].at > 900) {
+                        bursts.shift();
+                    }
+                    // Взрыв слышен всем: он и есть половина смысла
+                    // камня, и пропускать его глухо нельзя.
+                    Sound.sfx.burst();
+                    continue;
+                }
+
+                if (e.type === 'swing') {
+                    Sound.sfx.swing();
+                    continue;
+                }
+
                 if (e.type !== 'eliminated') continue;
                 feed.push({ id: e.id, by: e.by });
                 while (feed.length > 6) feed.shift();
+                Sound.sfx.out();
             }
 
             if (snap.finished) finished = true;

@@ -68,7 +68,7 @@ const cap = options.cap || 8000;
 
     let jumps = 0;
     let stones = 0;
-    let charges = 0;
+    let swings = 0;
     let pushes = 0;
     let moves = 0;
     let nonFinite = 0;
@@ -81,18 +81,21 @@ const cap = options.cap || 8000;
             inputs[p.id] = input;
             if (input.jump) jumps++;
             if (input.stone) stones++;
-            // Кнопка толчка: сколько тиков бот её держит, плюс сколько
-            // раз отпустил — второе и есть число ударов.
-            if (input.push) charges++;
+            // Толчок без заряда: считаются сами замахи (событие `swing`),
+            // а не тики удержания кнопки. Раньше здесь считалось, сколько
+            // тиков бот держал кнопку, и называлось это «зарядом» — но
+            // удержание тогда и было зарядом, а теперь это просто
+            // «кнопка нажата», и по нему ничего не сказать.
             if (Math.abs(input.x) + Math.abs(input.y) > 0.01) moves++;
             if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) nonFinite++;
         }
         for (const ev of step(arena, inputs)) {
+            if (ev.type === 'swing') swings++;
             if (ev.type === 'push') pushes++;
         }
     }
 
-    return { arena, ticks: arena.tick, jumps, stones, charges, pushes, moves, nonFinite };
+    return { arena, ticks: arena.tick, jumps, stones, swings, pushes, moves, nonFinite };
 }
 
 
@@ -107,7 +110,7 @@ const cap = options.cap || 8000;
     let winSecond = 0;
     let jumps = 0;
     let stones = 0;
-    let charges = 0;
+    let swings = 0;
     let pushes = 0;
     let moves = 0;
     let badNumbers = 0;
@@ -131,7 +134,7 @@ const cap = options.cap || 8000;
 
         jumps += r.jumps;
         stones += r.stones;
-        charges += r.charges;
+        swings += r.swings;
         pushes += r.pushes;
         moves += r.moves;
         badNumbers += r.nonFinite;
@@ -152,7 +155,7 @@ const cap = options.cap || 8000;
     console.log(
         `  победы: первый ${winFirst}, второй ${winSecond}, ` +
         `прыжков ${jumps}, камней ${stones}, ` +
-        `зарядов ${charges}, ударов ${pushes}`
+        `замахов ${swings}, ударов ${pushes}`
     );
 
     // Одна партия из тысячи (a621 против b621) доходила до потолка в
@@ -184,8 +187,11 @@ const cap = options.cap || 8000;
     // Толчок — единственный способ выбить с поля. Если боты его не
     // жмут, партия не может кончиться: ходьба прижимает к границе
     // и держит, а выносит только летящий.
-    check('боты копят заряд толчка', charges > N * 100,
-        `${charges} тиков удержания на ${N} партий`);
+    // Замахи вместо удержания кнопки: у заряда больше нет, и «сколько тиков
+    // бот держал кнопку» ничего не значит. Считается, что бот вообще
+    // начинает замах.
+    check('боты замахиваются', swings > N,
+        `${swings} замахов на ${N} партий`);
 
     check('боты стреляют толчком', pushes > N,
         `${pushes} ударов на ${N} партий`);
@@ -208,7 +214,7 @@ for (const count of [3, 5, 8]) {
     let longest = 0;
     let jumps = 0;
     let stones = 0;
-    let charges = 0;
+    let swings = 0;
     let pushes = 0;
 
     for (let i = 0; i < N; i++) {
@@ -219,7 +225,7 @@ for (const count of [3, 5, 8]) {
         longest = Math.max(longest, r.ticks);
         jumps += r.jumps;
         stones += r.stones;
-        charges += r.charges;
+        swings += r.swings;
         pushes += r.pushes;
 
         for (const p of r.arena.players) {
@@ -232,7 +238,7 @@ for (const count of [3, 5, 8]) {
     console.log(
         `  на ${count}: доиграно ${finished}/${N}, ` +
         `самая длинная ${longest} тиков, ` +
-        `зарядов ${charges}, ударов ${pushes}, прыжков ${jumps}, камней ${stones}`
+        `замахов ${swings}, ударов ${pushes}, прыжков ${jumps}, камней ${stones}`
     );
 
     check(`партия из ${count} игроков доигрывается`, finished === N,

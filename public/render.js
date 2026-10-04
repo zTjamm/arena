@@ -13,7 +13,7 @@
  * картинка одинаково вставала и в окно, и в маленький виджет.
  */
 
-const { T, marginOf, chargeTier } = require('../game/arena');
+const { T, marginOf } = require('../game/arena');
 const { drawHero, drawHand } = require('./hero-draw');
 
 /** Цвета, от которых раньше зависел весь рисунок. Остались для поля. */
@@ -39,21 +39,6 @@ const PUSH_FX_MS = 320;
 /** Сколько живёт вылет руки. Длиннее удара: рука летит вперёд, потом
  *  возвращается, и на одном веере она читалась бы как пятно. */
 const HAND_MS = 260;
-
-/**
- * Отлёт толчка в единицах поля. У толчка три ступени, и игрок должен
- * видеть, сколько именно набрал: пока эта дуга стоит на 100, рывком
- * на 300, а полным зарядом на 300 — ждать имеет смысл только в
- * последнем случае.
- */
-function pushRange(tier) {
-    return T.PUSH_TIERS[Math.max(0, Math.min(T.PUSH_TIERS.length - 1, tier - 1))];
-}
-
-/** Номер ступени заряда по накопленным секундам: 0, 1, 2 или 3. */
-function tierOf(charge) {
-    return chargeTier(charge);
-}
 
 function colorOf(index) {
     const n = PALETTE.length;
@@ -197,13 +182,16 @@ function facing(p) {
  * превратились бы в кашу, а учиться надо на своём.
  * На откате дуги гаснут — заодно видно, что бить пока нельзя.
  */
-function drawAim(ctx, view, sx, sy, p, ready, tier) {
+function drawAim(ctx, view, sx, sy, p, ready) {
     const { fx, fy } = facing(p);
     const angle = Math.atan2(fy, fx);
     const half = Math.acos(T.PUSH_COS);        // половина конуса удара
     const s = view.scale;
     const reach = T.PUSH_RANGE * s;
-    const flight = pushRange(tier) * s;
+    // Отлёт всегда один и тот же — PUSH_DIST. Ступеней больше нет, и
+    // дуга за краем конуса больше не меняется: показывать там можно
+    // ровно одно расстояние, а значит и рисовать незачем.
+    const flight = T.PUSH_DIST * s;
 
     ctx.save();
     ctx.globalAlpha = ready ? 1 : 0.35;
@@ -348,16 +336,15 @@ function drawPlayer(ctx, snap, view, p, index, opts) {
     const jumping = p.jumpLeft > 0;
     const stoned = p.stone > 0;
     const { fx, fy } = facing(p);
-    const tier = tierOf(p.charge);
+    const swinging = p.swing > 0;
 
     if (opts.me != null && p.id === opts.me) {
         // Во время обратного отсчёта прицел гаснет: бить всё равно
         // нельзя, и обещать досягаемость, которой сейчас нет, было бы
-        // враньём. Заряд при этом копится — кольцо под счёт видно.
+        // враньём. Замах при этом не берётся — гасить надо и его.
         const grace = snap.elapsed < T.SPAWN_GRACE;
         drawAim(ctx, view, sx, sy, p,
-            p.cooldowns.push <= 0 && !flying && !stoned && tier > 0 && !grace,
-            tier);
+            p.cooldowns.push <= 0 && !flying && !stoned && !swinging && !grace);
     }
 
     // Шлейф прыжка — три затухающих пятна позади по вектору полёта.
@@ -490,102 +477,67 @@ function drawPlayer(ctx, snap, view, p, index, opts) {
     // в том числе у летящего и у камня: их скиллы тоже на откате.
     drawStars(ctx, sx, sy, r, p.cooldowns, { spin });
 
-    // Кольцо заряда — рисуется после звёзд, чтобы кольцо было поверх
-    // героя, а не спорило с ними за место над головой.
+    // Замах толчка — рисуется после звёзд, чтобы он был поверх героя,
+    // а не спорил с ними за место над головой.
     if (!flying && !stoned) {
-        drawCharge(ctx, sx, sy, r, p.charge || 0, p.cooldowns.push <= 0);
+        drawSwing(ctx, sx, sy, r, p.swing || 0);
     }
 
-    // Заряд толчка вокруг героя. Главное, чего не хватало: заряд копится
-    // целую секунду, а цифра над головой появляется только на первой
-    // ступени. Всё это время у игрока не было **никакого** признака,
-// что кнопка нажата и что-то происходит — а смотреть на звёзды
-    // отката бесполезно, они не меняются.
-//
-// Кольцо заполняется вокруг героя снизу по часовой стрелке и на
-// границах ступеней у него засечки: видно, где «ещё чуть-чуть» до
-// следующей цифры. В последней пятой доле ступени кольцо ярче —
-// ступень вот-вот доберётся.
-function drawCharge(ctx, sx, sy, r, charge, ready) {
-    if (!(charge > 0)) return;
+/**
+ * Замах толчка: сколько осталось до удара.
+ *
+ * Раньше здесь стояло кольцо заряда — со ступенями, засечками и
+ * цифрой над головой. Теперь замах один, длится целую секунду и
+ * рисуется **наоборот**: не сколько накопилось, а сколько осталось.
+ * Причина в том, что секунду стоишь на месте и не знаешь, когда
+ * придёт удар, — с обратным отсчётом это видно сразу.
+ *
+ * Кольцо сжимается к герою и в последнюю четверть секунды
+ * становится ярче: удар вот-вот. Рисуется у всех, а не только у
+ * себя: по чужому замаху надо уйти с линии, и для этого его надо
+ * видеть.
+ */
+function drawSwing(ctx, sx, sy, r, swing) {
+    if (!(swing > 0)) return;
 
-    // Полный заряд берётся из ядра, а не вычисляется как «ступеней три,
-    // значит три секунды»: ступень теперь полсекунды, и полный заряд
-    // равен 1.5. Считать от количества ступеней было бы верно только
-    // при шаге в секунду — тогда кольцо показывало бы заряд меньше
-    // половины, когда он уже полный.
-    const full = T.PUSH_CHARGE_MAX;
-    const frac = Math.min(charge / full, 1); // 0..1 на весь заряд
-    const ring = r + 6;
-    const from = Math.PI / 2;                // низ круга
-    const to = from - frac * Math.PI * 2;
+    // Сколько секунд ещё стоять: полный круг — это полная секунда,
+    // и пустое место в начале — уже накопленная часть замаха.
+    const frac = Math.max(0, Math.min(1, swing / T.PUSH_WINDUP));
+    const ring = r + 6 + (1 - frac) * r * 0.9;
+
+    // Последняя четверть секунды: удар сейчас будет.
+    const soon = frac < 0.25 ? 1 - frac / 0.25 : 0;
 
     ctx.save();
-    ctx.lineCap = 'round';
 
-    // Подложка: полный круг серым, чтобы было видно, докуда набирать.
+    // Замах целиком — тонким кругом: видно, что игрок стоит и
+    // собирается бить.
     ctx.beginPath();
     ctx.arc(sx, sy, ring, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(127,208,255,0.18)';
+    ctx.strokeStyle = 'rgba(127,208,255,' + (0.30 + soon * 0.5).toFixed(3) + ')';
+    ctx.lineWidth = Math.max(2, r * 0.14);
+    ctx.stroke();
+
+    // Остаток замаха — плотным кругом: пустое место в начале и есть
+    // «уже прошло». Считается сверху, чтобы совпадало с началом,
+    // откуда бьющий смотрит на цель.
+    ctx.beginPath();
+    ctx.arc(sx, sy, ring, -Math.PI / 2, -Math.PI / 2 + (1 - frac) * Math.PI * 2);
+    ctx.strokeStyle = '#7fd0ff';
     ctx.lineWidth = Math.max(3, r * 0.22);
     ctx.stroke();
 
-    // Засечки на границах ступеней: половина и одна секунда.
-    ctx.lineCap = 'butt';
-    ctx.strokeStyle = 'rgba(12,17,28,0.85)';
-    ctx.lineWidth = Math.max(2, r * 0.14);
-    for (let i = 1; i < T.PUSH_TIERS.length; i++) {
-        const a = from - (i / T.PUSH_TIERS.length) * Math.PI * 2;
+    // Вспышка перед самым ударом: короткий выброс наружу.
+    if (soon > 0) {
         ctx.beginPath();
-        ctx.moveTo(sx + Math.cos(a) * (ring - r * 0.18),
-            sy + Math.sin(a) * (ring - r * 0.18));
-        ctx.lineTo(sx + Math.cos(a) * (ring + r * 0.18),
-            sy + Math.sin(a) * (ring + r * 0.18));
-        ctx.stroke();
-    }
-
-    // Набранное. Яркость зависит от того, насколько близко следующая
-    // ступень, — так «ещё немного» читается, не глядя на цифру.
-    const tier = chargeTier(charge);
-    const nextAt = Math.min(top, tier + 1);
-    const near = nextAt > 0 ? Math.min(1, (charge - tier) / (nextAt - tier)) : 1;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.arc(sx, sy, ring, to, from);
-    ctx.strokeStyle = ready ? '#7fd0ff' : 'rgba(127,208,255,0.45)';
-    ctx.lineWidth = Math.max(3, r * 0.22 + near * r * 0.14);
-    ctx.stroke();
-
-    // Свечение на свежей ступени: короткий выброс яркости прямо в
-    // момент, когда цифра перешагнула. Затухает за треть секунды.
-    const sinceStep = (charge - tier) / T.PUSH_CHARGE_STEP;
-    if (sinceStep < 0.35) {
-        const glow = (1 - sinceStep / 0.35);
-        ctx.beginPath();
-        ctx.arc(sx, sy, ring + glow * r * 0.5, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(200,240,255,' + (glow * 0.7).toFixed(3) + ')';
-        ctx.lineWidth = Math.max(1, r * 0.1 * glow);
+        ctx.arc(sx, sy, ring + soon * r * 0.7, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(200,240,255,' + (soon * 0.6).toFixed(3) + ')';
+        ctx.lineWidth = Math.max(1, r * 0.12 * soon);
         ctx.stroke();
     }
 
     ctx.restore();
 }
-
-// Цифра заряда толчка. Показывается у всех, а не только у себя:
-    // видно, что соперник замахивается, и можно уйти с линии.
-    if (!flying && !stoned && tier > 0) {
-        ctx.save();
-        ctx.font = '700 ' + Math.max(13, Math.round(r * 1.6)) +
-            'px system-ui, -apple-system, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.lineWidth = 3.5;
-        ctx.strokeStyle = 'rgba(12,17,28,0.9)';
-        ctx.fillStyle = '#7fd0ff';
-        ctx.strokeText(String(tier), sx, sy - r * 2.1);
-        ctx.fillText(String(tier), sx, sy - r * 2.1);
-        ctx.restore();
-    }
 
     if (opts.labels) {
         // Подпись под героем. Свой — заметно ярче и крупнее: на
@@ -673,6 +625,104 @@ function drawPushFx(ctx, view, snap, fx, now) {
     }
 }
 
+/** Сколько живёт поплывшая подпись цепочки. */
+const CHAIN_FX_MS = 1100;
+
+/**
+ * Подпись цепочки: «×3» у того, кого выбили последним.
+ *
+ * Показывается **только толкавшему** — это его достижение, и чужие
+ * очки ему не нужны. Но число считается только когда цепочка доиграла,
+ * то есть когда последний её участник встал на землю: в момент удара
+ * цепочка ещё только начинается, и показывать там всегда было бы
+ * «×1».
+ *
+ * Само число едет вверх и гаснет. Никаких полосок и стрелок: цепочка
+ * — это разовый счёт, а не состояние, и держать его на экране дольше
+ * двух секунд незачем.
+ */
+function drawChainFx(ctx, view, snap, fx, now) {
+    const k = (now - fx.at) / CHAIN_FX_MS;
+    if (!(k >= 0) || k >= 1) return;
+    if (!fx.mine) return;
+
+    const p = snap.players.find(q => q.id === fx.last);
+    if (!p) return;
+
+    const x = view.cx + p.x * view.scale;
+    const y = view.cy + p.y * view.scale - T.PLAYER_RADIUS * view.scale * 2.4;
+    const r = T.PLAYER_RADIUS * view.scale;
+
+    // В начале — резко, потом плавно: счёт должен успеть прочитаться,
+    // а не улететь вместе с ударом.
+    const pop = k < 0.15 ? 1 + (0.15 - k) * 2.4 : 1;
+    const alpha = k < 0.7 ? 1 : 1 - (k - 0.7) / 0.3;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = '900 ' + Math.round(r * 1.15 * pop) +
+        'px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const text = '×' + fx.count;
+    ctx.lineWidth = Math.max(3, r * 0.2);
+    ctx.strokeStyle = 'rgba(12,17,28,0.92)';
+    ctx.strokeText(text, x, y - k * r * 1.4);
+    ctx.fillStyle = '#ffd23d';
+    ctx.fillText(text, x, y - k * r * 1.4);
+
+    // Суммарная дальность под числом — мелким шрифтом: «×3» говорит,
+    // сколько людей, а сколько единиц суммарно сдвинуто — уже деталь,
+    // но именно она показывает, что цепочка стоила усилий.
+    ctx.font = '700 ' + Math.round(r * 0.52) +
+        'px system-ui, -apple-system, sans-serif';
+    ctx.lineWidth = Math.max(2, r * 0.12);
+    ctx.strokeStyle = 'rgba(12,17,28,0.9)';
+    const sub = Math.round(fx.power) + '';
+    ctx.strokeText(sub, x, y - k * r * 1.4 + r * 0.85);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText(sub, x, y - k * r * 1.4 + r * 0.85);
+    ctx.restore();
+}
+
+/** Сколько живёт кольцо взрыва камня. */
+const BURST_FX_MS = 520;
+
+/**
+ * Взрыв по истечении камня: расходящееся кольцо.
+ *
+ * Раньше камень был только щитом и показывать было нечего. Теперь в
+ * конце он разносит всех вокруг, и это надо показать: по кольцу видно
+ * границу, ради которой и стоило вставать в камень.
+ */
+function drawBurstFx(ctx, view, fx, now) {
+    const k = (now - fx.at) / BURST_FX_MS;
+    if (!(k >= 0) || k >= 1) return;
+
+    const x = view.cx + fx.x * view.scale;
+    const y = view.cy + fx.y * view.scale;
+    const full = fx.radius * view.scale;
+
+    // Кольцо расходится наружу и одновременно гаснет: чем дальше,
+    // тем бледнее — край волны читается, а середина уже отработала.
+    ctx.save();
+    ctx.globalAlpha = (1 - k) * 0.85;
+    ctx.beginPath();
+    ctx.arc(x, y, full * (0.25 + k * 0.85), 0, Math.PI * 2);
+    ctx.strokeStyle = '#c9a06a';
+    ctx.lineWidth = Math.max(2, 9 * (1 - k));
+    ctx.stroke();
+
+    ctx.globalAlpha = (1 - k) * 0.45;
+    ctx.beginPath();
+    ctx.arc(x, y, full * (0.25 + k * 0.85), 0, Math.PI * 2);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(1, 3 * (1 - k));
+    ctx.stroke();
+    ctx.restore();
+}
+
 /**
  * Полный кадр: фон, поле, выбывшие, живые, затем эффекты поверх.
  *
@@ -681,6 +731,8 @@ function drawPushFx(ctx, view, snap, fx, now) {
  * opts.pulse   — фаза 0..1 для пульсации кольца победителя;
  * opts.me      — мой игрок: только ему рисуется прицел толчка;
  * opts.effects — список ударов [{ by, dirx, diry, hits, at }];
+ * opts.chains  — цепочки [{ by, last, count, power, mine, at }];
+ * opts.bursts  — взрывы камня [{ x, y, radius, at }];
  * opts.spin    — секунды для качания хвостов и мигания звёзд.
  */
 function draw(ctx, snap, view, opts = {}) {
@@ -700,6 +752,8 @@ function draw(ctx, snap, view, opts = {}) {
     if (opts.effects && opts.effects.length) {
         const now = performance.now();
         for (const fx of opts.effects) drawPushFx(ctx, view, snap, fx, now);
+        for (const fx of opts.chains || []) drawChainFx(ctx, view, snap, fx, now);
+        for (const fx of opts.bursts || []) drawBurstFx(ctx, view, fx, now);
     }
 
     drawGrace(ctx, view, snap);
