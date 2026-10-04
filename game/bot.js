@@ -131,8 +131,28 @@ function personality(id, cycle = 0) {
     };
 }
 
-function neutral() {
-    return { x: 0, y: 0, jump: false, push: false, stone: false };
+/**
+ * Ввод, когда бот ничего не делает: летит, прыгает, камнем или один.
+ *
+ * Кнопку толчка здесь **нельзя** отпускать, если заряд уже накоплен.
+ * Ядро стреляет на отпускании, поэтому пустой ввод означал бы
+ * «выстрел» — и бот выпуливал бы полностью заряженный удар в ту
+ * сторону, куда его последний раз нёсло ходом. На разборе партии
+ * a366 против b366 косинус от удара до цели был ровно −1: удар уходил
+ * строго назад, бот промахивался каждые ~460 тиков, и двое стояли
+ * друг в друга до конца партии.
+ *
+ * Механика это списывает: летящий и прыгающий ввод всё равно
+ * игнорируются. Значит держать кнопку безопасно, а отпускать — нет.
+ */
+function neutral(bot) {
+    return {
+        x: 0,
+        y: 0,
+        jump: false,
+        push: !!(bot && bot.charge > 0),
+        stone: false,
+    };
 }
 
 /**
@@ -173,10 +193,10 @@ function marginLoss(p) {
 function botInput(bot, arena) {
     // Летящий, прыгающий и каменный не управляют собой, и пытаться
     // что-то нажимать бессмысленно — ядро ввод всё равно игнорирует.
-    if (bot.fly > 0 || bot.jumpLeft > 0 || bot.stone > 0) return neutral();
+    if (bot.fly > 0 || bot.jumpLeft > 0 || bot.stone > 0) return neutral(bot);
 
     const others = arena.players.filter(p => p.alive && p.id !== bot.id);
-    if (!others.length) return neutral();
+    if (!others.length) return neutral(bot);
 
     const SIZE = arena.size;
     const p = personality(bot.id);
@@ -391,7 +411,20 @@ function botInput(bot, arena) {
     const charged = tierOf(bot.charge) >= want;
 
     const canHold = bot.cooldowns.push <= 0 && gap < p.pushApproach;
-    const charge = canHold && !charged;
+
+    // Кнопку держим **всегда, пока можно**, в том числе когда заряд уже
+    // добран: отпускание — это выстрел, а выстрел без цели тратит
+    // откат впустую. С `canHold && !charged` бот, добрав заряд не в
+    // контакте, отпускал кнопку и тут же палил в пустоту по
+    // направлению хода.
+    //
+    // Это вторая половина той же ошибки, что и в neutral(): отпустить
+    // кнопку можно только чтобы выстрелить. Первую половину — прыжок
+    // и полёт выпуливали заряд — закрывает neutral(bot).
+    const charge = canHold;
+
+    // Единственное место, где кнопка отпускается осознанно: заряд
+    // добран, откат кончился, и удар точно достанет.
     const release = charged && bot.cooldowns.push <= 0 && inContact;
 
     // Тормозной путь. Фиксированного порога мало: в рывке скорость 430,

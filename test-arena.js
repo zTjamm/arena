@@ -520,6 +520,28 @@ function flyOut(arena, id) {
 }
 
 {
+    // Каменный **замирает на месте**, а не перестаёт нажимать кнопки.
+    // Разница видна только на ходу: скорость к моменту окаменения
+    // ещё полная, и если её не погасить, герой въедет в камень на
+    // полном ходу и ещё секунду будет скользить. Замеряно вживую:
+    // 54 единицы после окаменения на скорости 95.
+    const arena = createArena({ size: 3000 });
+    addPlayer(arena, 'a', { x: 0, y: 0 });
+
+    // Разгоняемся, потом окаменяем на ходу.
+    for (let i = 0; i < 30; i++) step(arena, { a: { x: 1 } });
+    const speed = arena.players[0].vx;
+    step(arena, { a: { x: 1, stone: true } });
+    const x0 = arena.players[0].x;
+    for (let i = 0; i < 40; i++) step(arena, { a: { x: 1 } });
+
+    check('окаменение на ходу останавливает сразу',
+        Math.abs(arena.players[0].x - x0) < 1e-6,
+        'скорость перед камнем ' + speed.toFixed(0) + ', сдвинулся на '
+        + (arena.players[0].x - x0).toFixed(3));
+}
+
+{
     // Камень кончился — игрок снова ходит.
     const arena = createArena({ size: 3000 });
     addPlayer(arena, 'a', { x: 0, y: 0 });
