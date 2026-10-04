@@ -276,6 +276,75 @@ function flyOut(arena, id) {
 }
 
 {
+    // Оглушение в полёте: пока летишь, ты не можешь ни окаменеть, ни
+    // прыгнуть, ни двигаться. Заряд при этом тоже не копится.
+    //
+    // Правило держится на двух проверках в `applySkills` и
+    // `applyMovement`, и ничем не было закреплено — а значит, любой
+    // сдвиг в них тихо ломал бы игру: выбитый мог бы на лету
+    // превратиться в камень и отбиться, то есть удар, который его
+    // выбил, оказывался бы бесполезным.
+    const arena = createArena({ size: 800 });
+    addPlayer(arena, 'att', { x: -80, y: 0 });
+    addPlayer(arena, 'me', { x: 0, y: 0 });
+    pastGrace(arena);
+    arena.players[0].dirx = 1;
+
+    // Выбиваем.
+    charged(arena, 'att', 15);
+    const me = arena.players[1];
+    check('жертва удара летит', me.fly > 0, 'полёт ' + me.fly.toFixed(0));
+
+    // В полёте жмём всё и двигаемся.
+    let inFlight = 0;
+    while (me.fly > 0 && inFlight < 200) {
+        step(arena, { me: { x: 1, y: 1, jump: true, stone: true, push: true } });
+        inFlight++;
+    }
+
+    check('в полёте не окаменеть', me.stone === 0,
+        'камень ' + me.stone.toFixed(2));
+    check('в полёте не прыгнуть',
+        me.jumpLeft === 0 && me.cooldowns.jump === 0,
+        'прыжок ' + me.jumpLeft.toFixed(0) + ', откат '
+        + me.cooldowns.jump.toFixed(2));
+    check('в полёте не двигаться',
+        Math.abs(me.vx) < 1e-6 && Math.abs(me.vy) < 1e-6,
+        'скорость ' + me.vx.toFixed(2) + ',' + me.vy.toFixed(2));
+    check('в полёте заряд не копится', me.charge === 0,
+        'заряд ' + me.charge.toFixed(2));
+}
+
+{
+    // Сразу после полёта всё сразу доступно: и ход, и скиллы, без
+    // ожидания и остаточного стана.
+    const arena = createArena({ size: 800 });
+    addPlayer(arena, 'att', { x: -80, y: 0 });
+    addPlayer(arena, 'me', { x: 0, y: 0 });
+    pastGrace(arena);
+    arena.players[0].dirx = 1;
+
+    charged(arena, 'att', 15);
+    const me = arena.players[1];
+    while (me.fly > 0) step(arena, {});
+
+    const x0 = me.x;
+    for (let i = 0; i < 10; i++) step(arena, { me: { x: 1 } });
+    check('после полёта сразу можно двигаться',
+        Math.abs(me.x - x0) > 5,
+        'сдвиг ' + (me.x - x0).toFixed(0));
+
+    step(arena, { me: { x: 1, jump: true } });
+    check('после полёта сразу можно прыгнуть', me.jumpLeft > 0,
+        'прыжок ' + me.jumpLeft.toFixed(0));
+
+    while (me.jumpLeft > 0) step(arena, {});
+    step(arena, { me: { stone: true } });
+    check('после полёта сразу можно окаменеть', me.stone > 0,
+        'камень ' + me.stone.toFixed(2));
+}
+
+{
     // Заряд не переполняется: полторы секунды удержания — это третья
     // ступень, а не бесконечное накопление. Держать дольше незачем.
     const arena = createArena({ size: 3000 });

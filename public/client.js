@@ -129,19 +129,31 @@
     const stickEl = document.getElementById('stick');
     const knobEl = document.getElementById('knob');
     const stick = { id: null, x: 0, y: 0 };
-    const STICK_R = 46;
+
+    /**
+     * Ход ручки берётся из размера джойстика, а не из константы.
+     *
+     * Джойстик меняется в размерах: 132 точек обычно и 104 на низком
+     * экране. Константа от размера не зависила, и на низком экране
+     * ручка ходила почти до края кружка, а её шарик в 56 точек
+     * наполовину вылезал наружу.
+     */
+    function stickRadius(box) {
+        return Math.min(box.width, box.height) * 0.35;
+    }
 
     function stickMove(e) {
         const box = stickEl.getBoundingClientRect();
+        const R = stickRadius(box);
         const dx = e.clientX - (box.left + box.width / 2);
         const dy = e.clientY - (box.top + box.height / 2);
         const dist = Math.hypot(dx, dy);
-        const k = dist > STICK_R ? STICK_R / dist : 1;
+        const k = dist > R ? R / dist : 1;
         const px = dx * k;
         const py = dy * k;
         knobEl.style.transform = `translate(${px}px, ${py}px)`;
-        stick.x = px / STICK_R;
-        stick.y = py / STICK_R;
+        stick.x = px / R;
+        stick.y = py / R;
     }
 
     function stickReset() {
@@ -169,30 +181,77 @@
     });
     stickEl.addEventListener('pointercancel', stickReset);
 
+    // Страховка от залипания джойстика — та же, что и у кнопок: если
+    // захват указателя не сработал, палец уйдёт с кружка, и джойстик
+    // останется нажатым с направлением в сторону, а персонаж будет
+    // вечно идти в стену. Отпускание ловится ещё и на окне.
+    function stickRelease(e) {
+        if (e && stick.id != null && e.pointerId !== stick.id) return;
+        stickReset();
+    }
+    window.addEventListener('pointerup', stickRelease);
+    window.addEventListener('pointercancel', stickRelease);
+
     // --- ввод: кнопки скиллов --------------------------------------------
 
     let btnPush = false;
     let btnJump = false;
     let btnStone = false;
 
+    /**
+     * Кнопка скилла на касании.
+     *
+     * Две тонкости, обе проверялись на телефоне и обе выглядят как
+     * «глючит управление»:
+     *
+     * 1. **Залипание.** Отпускание ловится только на самой кнопке.
+     *    Если `setPointerCapture` не сработал, палец может уйти с
+     *    кнопки, и её `pointerup` не увидит: палец отпустится над
+     *    другим элементом. Кнопка остаётся нажатой **навсегда** —
+     *    заряд копится, выстрелить нельзя, кнопка горит. Поэтому
+     *    отпускание ловится ещё и на окне: указатель, который держал
+     *    кнопку, отпущен где угодно — значит кнопка отпущена.
+     *
+     * 2. **Два пальца на одной кнопке.** Кнопку можно зажать обеими
+     *    руками. Отпускание одного пальца не должно её ронять, пока
+     *    второй держит, поэтому пальцы считаются множеством.
+     */
     function bindSkill(id, set) {
         const el = document.getElementById(id);
+        const holding = new Set();
+
         const on = (e) => {
             e.preventDefault();
-            // Как и у джойстика: захват указателя — удобство, а не
-            // условие. Отказ браузера не должен лишить кнопки скилла.
+            // Захват — удобство, а не условие: отказ браузера не
+            // должен лишить кнопки скилла. Страховка на окне ниже.
             try { el.setPointerCapture(e.pointerId); } catch (_) { /* best effort */ }
+            holding.add(e.pointerId);
             el.classList.add('held');
             set(true);
         };
-        const off = () => {
+
+        const off = (e) => {
+            if (e) {
+                // Указатель чужой: нас он не касается.
+                if (!holding.has(e.pointerId)) return;
+                holding.delete(e.pointerId);
+            } else {
+                holding.clear();
+            }
+            if (holding.size) return;      // держит ещё один палец
             el.classList.remove('held');
             set(false);
         };
+
         el.addEventListener('pointerdown', on);
         el.addEventListener('pointerup', off);
         el.addEventListener('pointercancel', off);
+        // Браузер сам снял захват — палец где-то отпустился.
+        el.addEventListener('lostpointercapture', off);
         el.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        window.addEventListener('pointerup', off);
+        window.addEventListener('pointercancel', off);
     }
 
     bindSkill('btnPush', (v) => { btnPush = v; });
