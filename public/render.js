@@ -351,8 +351,13 @@ function drawPlayer(ctx, snap, view, p, index, opts) {
     const tier = tierOf(p.charge);
 
     if (opts.me != null && p.id === opts.me) {
+        // Во время обратного отсчёта прицел гаснет: бить всё равно
+        // нельзя, и обещать досягаемость, которой сейчас нет, было бы
+        // враньём. Заряд при этом копится — кольцо под счёт видно.
+        const grace = snap.elapsed < T.SPAWN_GRACE;
         drawAim(ctx, view, sx, sy, p,
-            p.cooldowns.push <= 0 && !flying && !stoned && tier > 0, tier);
+            p.cooldowns.push <= 0 && !flying && !stoned && tier > 0 && !grace,
+            tier);
     }
 
     // Шлейф прыжка — три затухающих пятна позади по вектору полёта.
@@ -696,6 +701,54 @@ function draw(ctx, snap, view, opts = {}) {
         const now = performance.now();
         for (const fx of opts.effects) drawPushFx(ctx, view, snap, fx, now);
     }
+
+    drawGrace(ctx, view, snap);
+
+    ctx.restore();
+}
+
+/**
+ * Обратный отсчёт в начале партии: первые SPAWN_GRACE секунд удара
+ * нет.
+ *
+ * Молчание было бы худшим вариантом: игрок держит кнопку, ждёт
+ * полторы секунды, отпускает — и ничего не происходит. Выглядит как
+ * сломанный толчок, а не как правило. Поэтому прямо на поле стоит
+ * «БОЙ ЧЕРЕЗ 3», и всё видно.
+ *
+ * Считается из `snap.elapsed`, который и так есть в снимке, — значит
+ * протокол менять не пришлось.
+ */
+function drawGrace(ctx, view, snap) {
+    const left = T.SPAWN_GRACE - snap.elapsed;
+    if (!(left > 0)) return;
+
+    const cx = view.cx;
+    const cy = view.cy;
+    // Цифра целыми секундами: «2» держится вторую секунду, и глаз
+    // успевает её прочитать, а не ловит мельтешение 2.98 → 1.02.
+    const n = Math.ceil(left);
+    const t = left - Math.floor(left);      // доля внутри текущей секунды
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Гаснет к концу счёта: счёт идёт 3 → 2 → 1 и уходит незаметно,
+    // а не щёлкает и не мигает.
+    ctx.globalAlpha = 0.35 + 0.65 * (1 - t);
+    ctx.font = '800 ' + Math.max(40, Math.round(view.height * 0.16))
+        + 'px system-ui, -apple-system, sans-serif';
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = 'rgba(12,17,28,0.85)';
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeText(String(n), cx, cy - 12);
+    ctx.fillText(String(n), cx, cy - 12);
+
+    ctx.font = '700 ' + Math.max(13, Math.round(view.height * 0.045))
+        + 'px system-ui, -apple-system, sans-serif';
+    ctx.globalAlpha = 0.7;
+    ctx.fillText('УДАР ЧЕРЕЗ', cx, cy + view.height * 0.10);
 
     ctx.restore();
 }

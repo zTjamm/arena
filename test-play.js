@@ -197,6 +197,7 @@ for (const [label, opts] of CASES) {
     const walk = createArena({ size });
     addPlayer(walk, 'a', { x: -20, y: 0 });
     addPlayer(walk, 'b', { x: 10, y: 0 });
+    pastGrace(walk);
     for (let i = 0; i < TICKS; i++) step(walk, { a: { x: 1 }, b: away });
 
     // **Полный** заряд: три секунды держать, чтобы отбросить на 300.
@@ -210,6 +211,7 @@ for (const [label, opts] of CASES) {
     const pushed = createArena({ size });
     addPlayer(pushed, 'a', { x: -20, y: 0 });
     addPlayer(pushed, 'b', { x: 10, y: 0 });
+    pastGrace(pushed);
     for (let i = 0; i < TICKS; i++) {
         const A = pushed.players[0];
         const B = pushed.players[1];
@@ -242,15 +244,29 @@ for (const [label, opts] of CASES) {
     // проверяется обратное: у края хватает и слабой ступени.
     const weak = createArena({ size: 200 });
     addPlayer(weak, 'a', { x: 0, y: 0 });
-    addPlayer(weak, 'b', { x: 40, y: 0 });
+    addPlayer(weak, 'b', { x: 70, y: 0 });
+    pastGrace(weak);
     step(weak, { a: { x: 1, push: true } });
-    for (let i = 0; i < 29; i++) step(weak, { a: { push: true } });
+    for (let i = 0; i < 14; i++) step(weak, { a: { push: true } });
     step(weak, { a: { push: false } });
     for (let i = 0; i < 20; i++) step(weak, {});
 
     check('слабого заряда у самого края хватает',
         weak.players[1].alive === false,
         `жив с запасом ${(100 - Math.abs(weak.players[1].x)).toFixed(0)}`);
+}
+
+
+/**
+ * Прожить первые секунды партии, когда бить ещё нельзя.
+ *
+ * Первые SPAWN_GRACE секунд удара нет, и любой сценарий, который
+ * бьёт сразу после расстановки, просто не выстрелит. Проверять
+ * отсчёт — дело другого теста, здесь он просто пропускается.
+ */
+function pastGrace(arena) {
+    const ticks = Math.ceil(T.SPAWN_GRACE / T.TICK);
+    for (let i = 0; i < ticks; i++) step(arena, {});
 }
 
 
@@ -281,15 +297,18 @@ for (const [label, opts] of CASES) {
     const size = 800;
     const arena = createArena({ size });
     addPlayer(arena, 'a', { x: 0, y: 0 });
-    addPlayer(arena, 'b', { x: 40, y: 0 });
+    addPlayer(arena, 'b', { x: 70, y: 0 });
     arena.players[0].dirx = 1;
+    pastGrace(arena);
 
+    // Камень включается после отсчёта: он держится две секунды, а
+    // отсчёт длится три, и окаменение до него сгорело бы впустую.
     step(arena, { b: { stone: true } });
-    for (let i = 0; i < 30; i++) step(arena, { a: { push: true } });
+    for (let i = 0; i < 15; i++) step(arena, { a: { push: true } });
     step(arena, { a: { push: false } });
 
     const b = arena.players[1];
-    check('каменный не улетел', b.fly === 0 && Math.abs(b.x - 40) < 30,
+    check('каменный не улетел', b.fly === 0 && Math.abs(b.x - 70) < 30,
         `x ${b.x.toFixed(0)}`);
     check('бьющий отскочил назад',
         arena.players[0].fly > 0 && arena.players[0].flyx < 0,

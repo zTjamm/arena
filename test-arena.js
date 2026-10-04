@@ -149,7 +149,24 @@ function check(name, condition, detail) {
  * Перед отпусканием запоминает, где стояли остальные: удар начинается
  * в том же тике, и его первый шаг — тоже часть отлёта.
  */
+/**
+ * Прожить первые SPAWN_GRACE секунд партии.
+ *
+ * Нужна всем проверкам удара: первые три секунды бить нельзя, и
+ * сценарий, который копит заряд с самого старта, просто не выстрелит
+ * — проверка падала бы не потому, что удар сломался, а потому, что
+ * его ещё не существует.
+ */
+function pastGrace(arena) {
+    const ticks = Math.ceil(T.SPAWN_GRACE / T.TICK);
+    for (let i = 0; i < ticks; i++) step(arena, {});
+}
+
 function charged(arena, id, ticks) {
+    // Отсчёт — до зарядки, а не после: иначе копить пришлось бы
+    // три секунды, и ступени перестали бы быть ступенями.
+    pastGrace(arena);
+
     const inputs = {};
     for (let i = 0; i < ticks; i++) {
         inputs[id] = { push: true };
@@ -202,10 +219,68 @@ function flyOut(arena, id) {
 }
 
 {
+    // Первые SPAWN_GRACE секунд удара нет.
+    //
+    // Проверяется в три приёма, потому что «удара нет» можно
+    // понимать по-разному, и важно, чтобы работало именно то, что
+    // обещано:
+    //
+    //   1) удар не проходит даже в упор и с полным зарядом;
+    //   2) заряд при этом **не сгорает** — иначе игрок потерял бы
+    //      полторы секунды набора впустую;
+    //   3) откат не тратится.
+    const arena = createArena({ size: 3000 });
+    addPlayer(arena, 'a', { x: 0, y: 0 });
+    addPlayer(arena, 'b', { x: 70, y: 0 });
+    arena.players[0].dirx = 1;
+
+    // Полторы секунды удержания — полный заряд.
+    for (let i = 0; i < 45; i++) step(arena, { a: { push: true } });
+    const chargedBefore = arena.players[0].charge;
+
+    step(arena, { a: { push: false } });
+
+    check('в первые секунды удар не проходит', arena.players[1].fly === 0,
+        'полёт ' + arena.players[1].fly.toFixed(0)
+        + ' на ' + arena.elapsed.toFixed(2) + ' с');
+    check('заряд на отсчёте не сгорает',
+        Math.abs(arena.players[0].charge - chargedBefore) < 1e-6,
+        'было ' + chargedBefore.toFixed(2) + ', стало '
+        + arena.players[0].charge.toFixed(2));
+    check('откат на отсчёте не тратится',
+        arena.players[0].cooldowns.push === 0,
+        'откат ' + arena.players[0].cooldowns.push.toFixed(2));
+}
+
+{
+    // Отсчёт кончился — бить можно, и копивший заряд уходит первым же
+    // ударом. Иначе вышло бы, что три секунды заряда просто пропали.
+    const arena = createArena({ size: 3000 });
+    addPlayer(arena, 'a', { x: 0, y: 0 });
+    addPlayer(arena, 'b', { x: 70, y: 0 });
+    arena.players[0].dirx = 1;
+
+    for (let i = 0; i < 45; i++) step(arena, { a: { push: true } });
+    step(arena, { a: { push: false } });
+    check('на отсчёте удара ещё нет', arena.players[1].fly === 0);
+
+    // Ждём ровно до конца отсчёта.
+    const left = Math.ceil((T.SPAWN_GRACE - arena.elapsed) * 30);
+    for (let i = 0; i < left; i++) step(arena, {});
+
+    const events = step(arena, {});
+    check('после отсчёта копивший заряд уходит',
+        events.some(e => e.type === 'push' && e.hits.length > 0),
+        'события ' + events.map(e => e.type).join(',')
+        + ', отсчёт кончился на ' + arena.elapsed.toFixed(2) + ' с');
+}
+
+{
     // Заряд не переполняется: полторы секунды удержания — это третья
     // ступень, а не бесконечное накопление. Держать дольше незачем.
     const arena = createArena({ size: 3000 });
     addPlayer(arena, 'a', { x: 0, y: 0 });
+    pastGrace(arena);
     for (let i = 0; i < 90; i++) step(arena, { a: { push: true } });
 
     check('заряд не переполняется',
@@ -224,6 +299,7 @@ function flyOut(arena, id) {
     addPlayer(arena, 'a', { x: 0, y: 0 });
     addPlayer(arena, 'b', { x: 70, y: 0 });
     arena.players[0].dirx = 1;
+    pastGrace(arena);
 
     for (let i = 0; i < 10; i++) step(arena, { a: { push: true } });
     step(arena, { a: { push: false } });
@@ -302,10 +378,12 @@ function flyOut(arena, id) {
     addPlayer(arena, 'a', { x: 0, y: 0 });
     addPlayer(arena, 'b', { x: 70, y: 0 });
     arena.players[0].dirx = 1;
+    pastGrace(arena);
 
+    // Камень включается уже после отсчёта: он держится две секунды,
+    // а отсчёт длится три, и окаменение до него сгорело бы впустую.
     step(arena, { b: { stone: true } });
-    // Полсекунды удержания — минимальная ступень. Камень держится две
-    // секунды, поэтому заряд в него успевает уложиться.
+    // Полсекунды удержания — минимальная ступень.
     for (let i = 0; i < 15; i++) step(arena, { a: { push: true } });
     step(arena, { a: { push: false } });
 
