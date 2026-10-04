@@ -216,6 +216,134 @@
     }
     applyControlMode();
 
+    // --- поворот экрана ----------------------------------------------------
+
+    /**
+     * Заслонка «поверните устройство» и попытка повернуть сам экран.
+     *
+     * Поле квадратное, а портретный телефон — узкий. В портрете от
+     * поля остаётся полоса в середине экрана, герои сливаются в
+     * пятна, а джойстик с кнопками отнимают высоту, которой и так
+     * в обрез. Играть приходится, отвернувшись от экрана.
+     *
+     * Силовой поворот просить нельзя: `screen.orientation.lock`
+     * браузеры дают только из полноэкранного режима и только после
+     * жеста пользователя. Поэтому тут два независимых способа:
+     *
+     *   1. попытка захвата — если сработала, экран повернётся сам;
+     *   2. заслонка — если не сработала, игра прямо говорит, что
+     *      надо повернуть устройство руками.
+     *
+     * Заслонка показывается только в партии и только на узком экране:
+     * на компьютере её прятать незачем, а в чате и на форме входа
+     * поворот не нужен вовсе.
+     */
+    const rotateEl = document.getElementById('rotate');
+    const gameScreen = document.getElementById('gameScreen');
+
+    /**
+     * Экран размером с ладонь — телефон или планшет, а не окно
+     * браузера на компьютере.
+     *
+     * Порог 1200, а не 700: планшет в портрете даёт 820 на 1180, а
+     * крупный — 1024 на 1366, и при семисотниках оба считались бы
+     * «широкими», то есть ровно на устройствах, которые просили
+     * повернуть, заслонка бы не появилась.
+     *
+     * Второе условие — палец, и оно главное. Без него узкое окно на
+     * компьютере сочлось бы телефоном, а это не то: окно можно
+     * расширить, и человек не обязан его крутить. С пальцем порог
+     * нужен только чтобы не ловить огромный монитор с сенсором.
+     */
+    function narrow() {
+        if (Math.min(window.innerWidth, window.innerHeight) >= 1200) return false;
+        return window.matchMedia('(pointer: coarse)').matches
+            || navigator.maxTouchPoints > 0;
+    }
+
+    /**
+     * Портрет ли **видимая область**.
+     *
+     * Именно окна, а не `screen.orientation`: ориентация экрана на
+     * компьютере всегда «альбомная», и на узком окне планшета в
+     * многооконном режиме она может говорить не то, что видит игрок.
+     * Игроку важно, taller или шире то, что он видит, — про это и
+     * спрашивает окно.
+     *
+     * Экранная ориентация остаётся запасным вариантом на случай, когда
+     * размеры окна недоступны (в некоторых встроенных вьюерах бывает 0).
+     */
+    function portrait() {
+        if (window.innerWidth > 0 && window.innerHeight > 0) {
+            return window.innerHeight > window.innerWidth;
+        }
+        if (screen.orientation && typeof screen.orientation.type === 'string') {
+            return screen.orientation.type.startsWith('portrait');
+        }
+        return false;
+    }
+
+    /** Показывать ли заслонку: только узкий экран и только портрет. */
+    function shouldRotate(isNarrow, isPortrait) {
+        return isNarrow && isPortrait;
+    }
+
+    function updateRotateGate() {
+        const on = shouldRotate(narrow(), portrait());
+        rotateEl.classList.toggle('on', on);
+        // Пока портрет, поле не рисуется: незачем тратить кадр на
+        // картинку, которую всё равно не видно под заслонкой.
+        //
+        // Холст берём здесь, а не из переменной `canvas`: объявлена
+        // она ниже, и обращение отсюда было бы обращением к переменной
+        // в мёртвой зоне — исключение, а не undefined.
+        const field = document.getElementById('field');
+        if (field) field.style.visibility = on ? 'hidden' : '';
+    }
+
+    // Уже пробовали захватить ориентацию в этой сессии? Повторные
+    // попытки без жеста пользователя только сыпят отказами.
+    let lockTried = false;
+
+    /** Один раз, по жесту: вход в полный экран и захват ориентации. */
+    function tryLockLandscape() {
+        if (lockTried) return;
+        lockTried = true;
+
+        const target = screen.orientation;
+        if (!target || typeof target.lock !== 'function') return;
+
+        // Полный экран — обязательное условие: без него lock отклоняется
+        // почти всегда. Запрос полного экрана тоже требует жеста,
+        // поэтому он и делается прямо здесь, из обработчика нажатия.
+        const go = () => {
+            Promise.resolve(target.lock('landscape')).catch(() => {
+                // Не вышло — ничего страшного, покажет заслонка.
+            });
+        };
+
+        if (document.fullscreenElement) {
+            go();
+            return;
+        }
+
+        const el = document.documentElement;
+        if (el.requestFullscreen) {
+            Promise.resolve(el.requestFullscreen()).then(go).catch(go);
+        } else {
+            go();
+        }
+    }
+
+    window.addEventListener('resize', updateRotateGate);
+    window.addEventListener('orientationchange', updateRotateGate);
+    if (screen.orientation) {
+        screen.orientation.addEventListener('change', updateRotateGate);
+    }
+    // Заслонка поверх поля: нажатие на неё и есть тот самый жест.
+    rotateEl.addEventListener('pointerdown', tryLockLandscape);
+    updateRotateGate();
+
     function readInput() {
         let x = 0;
         let y = 0;
@@ -411,6 +539,17 @@ setInterval(() => {
         get effects() { return effects.length; },
         get finished() { return finished; },
         get score() { return score; },
+
+        // Заслонка поворота. Без неё нечем проверить решение «показывать
+        // или нет»: окно у разработчика широкое, а телефон узкий.
+        rotate: {
+            get narrow() { return narrow(); },
+            get portrait() { return portrait(); },
+            get shown() { return rotateEl.classList.contains('on'); },
+            refresh: updateRotateGate,
+            lockLandscape: tryLockLandscape,
+            shouldRotate,
+        },
     };
 
     // --- петля кадров -----------------------------------------------------

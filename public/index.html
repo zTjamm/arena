@@ -353,6 +353,55 @@
 
     #gameScreen { touch-action: none; }
 
+    /*
+        Заслонка поворота. Показывается только мобильным и только в
+        портрете — см. rotateGate() в public/client.js. На телефоне в
+        альбомной ориентации её быть не должно, и на компьютере тоже:
+        там окно и так шире, чем поле.
+    */
+    #rotate {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        text-align: center;
+        padding: 24px;
+        background: var(--bg, #0c111c);
+        color: var(--ink, #e8f0ff);
+    }
+
+    #rotate.on { display: flex; }
+
+    #rotate b { font-size: 20px; }
+    #rotate span { opacity: 0.7; font-size: 14px; }
+
+    /* Значок телефона, который надо повернуть. Чистая геометрия,
+       чтобы не тащить картинку ради одной подсказки. */
+    #rotate .rotateIcon {
+        width: 58px;
+        height: 96px;
+        border: 3px solid currentColor;
+        border-radius: 10px;
+        opacity: 0.85;
+        animation: rotateHint 2.4s ease-in-out infinite;
+    }
+
+    @keyframes rotateHint {
+        0%, 30%   { transform: rotate(0deg); }
+        55%, 80%  { transform: rotate(-90deg); }
+        100%      { transform: rotate(0deg); }
+    }
+
+    /* Решение «показывать или нет» принимает только JS — rotateGate()
+       в public/client.js. Медиазапроса по ориентации здесь намеренно
+       нет: он спорил бы с JS, и при расхождении выигрывал бы CSS —
+       то есть на телефоне, который JS считал портретным, заслонка бы
+       не появилась, а поле осталось бы пустым и неиграбельным. */
+
     #field { position: fixed; inset: 0; display: block; }
 
     #hud {
@@ -718,6 +767,26 @@
             <button id="btnJump">ПРЫЖОК</button>
             <button id="btnPush">ТОЛЧОК</button>
         </div>
+    </div>
+
+    <!--
+        Заслонка «поверни устройство».
+
+        Поле — квадрат, а экран телефона в портрете — узкий и высокий.
+        В портрете от поля остаётся узкая полоса в середине, герои
+        становятся пятнами в пятно, а джойстик с кнопками съедают
+        высоту, которой и так мало: играть приходится, отвернувшись.
+
+        Поворот насильно просить нельзя: `screen.orientation.lock`
+        браузеры разрешают только из полноэкранного режима и только
+        после жеста пользователя, поэтому он тут только как
+        ускоритель. Основной способ — заслонка: она срабатывает всегда
+        и на любом устройстве, где нет landscape-режима.
+    -->
+    <div id="rotate">
+        <div class="rotateIcon"></div>
+        <b>Поверните устройство</b>
+        <span>Играть удобнее боком</span>
     </div>
 </div>
 

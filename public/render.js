@@ -441,15 +441,91 @@ function drawPlayer(ctx, snap, view, p, index, opts) {
     // в том числе у летящего и у камня: их скиллы тоже на откате.
     drawStars(ctx, sx, sy, r, p.cooldowns, { spin });
 
-    // Цифра заряда толчка. Показывается у всех, а не только у себя:
+    // Кольцо заряда — рисуется после звёзд, чтобы кольцо было поверх
+    // героя, а не спорило с ними за место над головой.
+    if (!flying && !stoned) {
+        drawCharge(ctx, sx, sy, r, p.charge || 0, p.cooldowns.push <= 0);
+    }
+
+    // Заряд толчка вокруг героя. Главное, чего не хватало: заряд копится
+    // целую секунду, а цифра над головой появляется только на первой
+    // ступени. Всё это время у игрока не было **никакого** признака,
+// что кнопка нажата и что-то происходит — а смотреть на звёзды
+    // отката бесполезно, они не меняются.
+//
+// Кольцо заполняется вокруг героя снизу по часовой стрелке и на
+// границах ступеней у него засечки: видно, где «ещё чуть-чуть» до
+// следующей цифры. В последней пятой доле ступени кольцо ярче —
+// ступень вот-вот доберётся.
+function drawCharge(ctx, sx, sy, r, charge, ready) {
+    if (!(charge > 0)) return;
+
+    const top = T.PUSH_TIERS.length;          // ступеней всего три
+    const frac = Math.min(charge / top, 1); // 0..1 на весь заряд
+    const ring = r + 6;
+    const from = Math.PI / 2;                // низ круга
+    const to = from - frac * Math.PI * 2;
+
+    ctx.save();
+    ctx.lineCap = 'round';
+
+    // Подложка: полный круг серым, чтобы было видно, докуда набирать.
+    ctx.beginPath();
+    ctx.arc(sx, sy, ring, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(127,208,255,0.18)';
+    ctx.lineWidth = Math.max(3, r * 0.22);
+    ctx.stroke();
+
+    // Засечки на границах ступеней: 1 и 2 секунды.
+    ctx.lineCap = 'butt';
+    ctx.strokeStyle = 'rgba(12,17,28,0.85)';
+    ctx.lineWidth = Math.max(2, r * 0.14);
+    for (let i = 1; i < top; i++) {
+        const a = from - (i / top) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(sx + Math.cos(a) * (ring - r * 0.18),
+            sy + Math.sin(a) * (ring - r * 0.18));
+        ctx.lineTo(sx + Math.cos(a) * (ring + r * 0.18),
+            sy + Math.sin(a) * (ring + r * 0.18));
+        ctx.stroke();
+    }
+
+    // Набранное. Яркость зависит от того, насколько близко следующая
+    // ступень, — так «ещё немного» читается, не глядя на цифру.
+    const tier = chargeTier(charge);
+    const nextAt = Math.min(top, tier + 1);
+    const near = nextAt > 0 ? Math.min(1, (charge - tier) / (nextAt - tier)) : 1;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(sx, sy, ring, to, from);
+    ctx.strokeStyle = ready ? '#7fd0ff' : 'rgba(127,208,255,0.45)';
+    ctx.lineWidth = Math.max(3, r * 0.22 + near * r * 0.14);
+    ctx.stroke();
+
+    // Свечение на свежей ступени: короткий выброс яркости прямо в
+    // момент, когда цифра перешагнула. Затухает за треть секунды.
+    const sinceStep = (charge - tier) / T.PUSH_CHARGE_STEP;
+    if (sinceStep < 0.35) {
+        const glow = (1 - sinceStep / 0.35);
+        ctx.beginPath();
+        ctx.arc(sx, sy, ring + glow * r * 0.5, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(200,240,255,' + (glow * 0.7).toFixed(3) + ')';
+        ctx.lineWidth = Math.max(1, r * 0.1 * glow);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+// Цифра заряда толчка. Показывается у всех, а не только у себя:
     // видно, что соперник замахивается, и можно уйти с линии.
     if (!flying && !stoned && tier > 0) {
         ctx.save();
-        ctx.font = '700 ' + Math.max(12, Math.round(r * 1.5)) +
+        ctx.font = '700 ' + Math.max(13, Math.round(r * 1.6)) +
             'px system-ui, -apple-system, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 3.5;
         ctx.strokeStyle = 'rgba(12,17,28,0.9)';
         ctx.fillStyle = '#7fd0ff';
         ctx.strokeText(String(tier), sx, sy - r * 2.1);

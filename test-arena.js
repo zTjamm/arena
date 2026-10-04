@@ -545,6 +545,47 @@ function flyOut(arena, id) {
         'осталось ' + arena.players[0].stone.toFixed(3));
 }
 
+{
+    // Камень неподвижен и **от разведения**, а не только от своего
+    // хода. Проверяется тем, что в него упираются дважды: собственный
+    // ход проверяет уже предыдущий тест, а здесь важно другое — камень
+    // нельзя сдвинуть ни выжиманием, ни налетевшим на него телом.
+    const arena = createArena({ size: 3000 });
+    addPlayer(arena, 'stone', { x: 0, y: 0 });
+    addPlayer(arena, 'pusher', { x: -T.PLAYER_RADIUS, y: 0 });
+
+    step(arena, { stone: { stone: true } });
+    const x0 = arena.players[0].x;
+
+    // Пятидесяти тиков в упор: толкающий идёт **в камень**, то есть
+    // вправо. Уйти влево — просто разойтись, и проверка прошла бы
+    // вхолостую, ни разу не коснувшись камня.
+    for (let i = 0; i < 50; i++) {
+        step(arena, { pusher: { x: 1 } });
+    }
+
+    check('камень нельзя сдвинуть выжиманием',
+        arena.players[0].x === x0,
+        'сдвинулся на ' + (arena.players[0].x - x0).toFixed(4));
+
+    // И налетевшее тело тоже не должно унести камень: от удара
+    // отскакивает бьющий, а не тот, кто стоял.
+    const arena2 = createArena({ size: 3000 });
+    addPlayer(arena2, 'stone', { x: 0, y: 0 });
+    addPlayer(arena2, 'att', { x: -260, y: 0 });
+    step(arena2, { stone: { stone: true } });
+
+    const sx = arena2.players[0].x;
+    for (let i = 0; i < 30; i++) step(arena2, { att: { x: 1, push: true } });
+    step(arena2, { att: { push: false } });
+    for (let i = 0; i < 12; i++) step(arena2, {});
+
+    check('налетевший удар не сдвигает камень',
+        arena2.players[0].x === sx,
+        'камень сдвинулся на ' + (arena2.players[0].x - sx).toFixed(4)
+        + ', бьющий жив ' + arena2.players[1].alive);
+}
+
 
 // --- Конец партии: остаётся один ------------------------------------------
 

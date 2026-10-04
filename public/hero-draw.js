@@ -271,6 +271,13 @@ function dots(ctx, hy, r, size) {
  * дальше возврат. Движение сглажено через smoothstep — разгон в начале
  * заметно быстрее отмаха рукой, чем равномерное хождение туда-обратно.
  *
+ * **Рука длиннее и шире вдвое.** И то и другое просили по игре: с
+ * короткой и узкой кистью не было видно, что удар вообще куда-то
+ * летит, и попадать казалось случайным. Вдвое длинный вылет заходит
+ * за досягаемость удара и упирается в цель с другой стороны — замах
+ * виден целиком, от плеча до пальцев, и рука перестаёт быть точкой
+ * у самого носика.
+ *
  * Ладонь — круг, пальцы — четыре линии, большой палец — сбоку: без него
  * кисть читается как варежка.
  */
@@ -281,7 +288,7 @@ function drawHand(ctx, sx, sy, fx, fy, r, k, color) {
     else travel = 1 - (k - 0.7) / 0.3;
 
     const reach = travel * travel * (3 - 2 * travel);
-    const dist = r * 0.4 + reach * r * 2.6;
+    const dist = r * 0.6 + reach * r * 5.2;
 
     ctx.save();
 
@@ -292,14 +299,14 @@ function drawHand(ctx, sx, sy, fx, fy, r, k, color) {
     ctx.strokeStyle = 'rgba(255,255,255,0.5)';
     ctx.lineCap = 'round';
     for (let i = 1; i <= 3; i++) {
-        const back = reach * r * i * 0.7;
+        const back = reach * r * i * 1.4;
         ctx.globalAlpha = (1 - k) * 0.35 / i;
-        ctx.lineWidth = Math.max(1.5, r * 0.16);
+        ctx.lineWidth = Math.max(2, r * 0.3);
         ctx.beginPath();
-        ctx.moveTo(sx + fx * (dist - back) + ux * r * 0.1,
-            sy + fy * (dist - back) + uy * r * 0.1);
-        ctx.lineTo(sx + fx * (dist - back) - ux * r * 0.1,
-            sy + fy * (dist - back) - uy * r * 0.1);
+        ctx.moveTo(sx + fx * (dist - back) + ux * r * 0.2,
+            sy + fy * (dist - back) + uy * r * 0.2);
+        ctx.lineTo(sx + fx * (dist - back) - ux * r * 0.2,
+            sy + fy * (dist - back) - uy * r * 0.2);
         ctx.stroke();
     }
     ctx.lineCap = 'butt';
@@ -311,29 +318,29 @@ function drawHand(ctx, sx, sy, fx, fy, r, k, color) {
     // Тёмный контур под рукой: без него на тёмном поле ладонь того же
     // тона, что и герой, сливается с ним.
     ctx.beginPath();
-    ctx.arc(0, 0, r * 0.56, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(12,17,28,0.75)';
-    ctx.lineWidth = Math.max(2, r * 0.14);
+    ctx.arc(0, 0, r * 1.1, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(12,17,28,0.8)';
+    ctx.lineWidth = Math.max(3, r * 0.26);
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.arc(0, 0, r * 0.52, 0, Math.PI * 2);
+    ctx.arc(0, 0, r * 1.02, 0, Math.PI * 2);
     ctx.fillStyle = color;
     ctx.fill();
 
     ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(2, r * 0.19);
+    ctx.lineWidth = Math.max(3, r * 0.38);
     ctx.lineCap = 'round';
     for (let i = -1; i <= 2; i++) {
         ctx.beginPath();
-        ctx.moveTo(r * 0.26, i * r * 0.2);
-        ctx.lineTo(r * 0.78, i * r * 0.23);
+        ctx.moveTo(r * 0.5, i * r * 0.4);
+        ctx.lineTo(r * 1.55, i * r * 0.46);
         ctx.stroke();
     }
     // Большой палец.
     ctx.beginPath();
-    ctx.moveTo(-r * 0.12, r * 0.32);
-    ctx.lineTo(-r * 0.44, r * 0.54);
+    ctx.moveTo(-r * 0.24, r * 0.66);
+    ctx.lineTo(-r * 0.9, r * 1.08);
     ctx.stroke();
     ctx.lineCap = 'butt';
 
