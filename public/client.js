@@ -375,6 +375,17 @@
     function updateRotateGate() {
         const on = shouldRotate(narrow(), portrait());
         rotateEl.classList.toggle('on', on);
+
+        // Подпись под заголовком меняется по platforms: где захват
+        // невозможен в принципе (iOS), обещать «повернём сами» было бы
+        // враньём, и человек всё равно ждал бы, что экран повернётся.
+        const note = rotateEl.querySelector('.rotateNote');
+        if (note) {
+            note.textContent = lockSupported()
+                ? 'Играть удобнее боком'
+                : 'Браузер не даёт повернуть сам — поверните устройство';
+        }
+
         // Пока портрет, поле не рисуется: незачем тратить кадр на
         // картинку, которую всё равно не видно под заслонкой.
         //
@@ -385,38 +396,69 @@
         if (field) field.style.visibility = on ? 'hidden' : '';
     }
 
-    // Уже пробовали захватить ориентацию в этой сессии? Повторные
-    // попытки без жеста пользователя только сыпят отказами.
+    // Уже пробовали захватить ориентацию? Повторные попытки без жеста
+    // пользователя только сыпят отказами.
     let lockTried = false;
+    let lockResult = null;       // 'locked' | 'unsupported' | 'failed'
 
-    /** Один раз, по жесту: вход в полный экран и захват ориентации. */
+    /**
+     * Браузер вообще умеет захват ориентации?
+     *
+     * На iOS и в iPadOS — **нет**: Safari не отдаёт `screen.orientation`
+     * для страниц вовсе, и `lock()` там отсутствует как класс
+     * функции. Никакой код это не обойдёт: единственный способ — самому
+     * пользователю повернуть устройство. Поэтому дальше заслонка
+     * говорит ровно об этом, а не обещает того, что не случится.
+     */
+    function lockSupported() {
+        const target = typeof screen !== 'undefined' ? screen.orientation : null;
+        return !!target && typeof target.lock === 'function';
+    }
+
+    /**
+     * Захват альбомной ориентации. Возвращает обещание с итогом.
+     *
+     * Обязательно **синхронно из обработчика нажатия**: и полный
+     * экран, и lock требуют жеста пользователя, и через await или
+     * ответ сервера жест уже истёк — попытка молча провалится.
+     *
+     * Поэтому захват висит на кнопке «Играть»: это и есть жест, и
+     * второго тапа по заслонке не требуется.
+     */
     function tryLockLandscape() {
-        if (lockTried) return;
+        if (lockTried) return Promise.resolve(lockResult);
         lockTried = true;
 
-        const target = screen.orientation;
-        if (!target || typeof target.lock !== 'function') return;
-
-        // Полный экран — обязательное условие: без него lock отклоняется
-        // почти всегда. Запрос полного экрана тоже требует жеста,
-        // поэтому он и делается прямо здесь, из обработчика нажатия.
-        const go = () => {
-            Promise.resolve(target.lock('landscape')).catch(() => {
-                // Не вышло — ничего страшного, покажет заслонка.
-            });
-        };
-
-        if (document.fullscreenElement) {
-            go();
-            return;
+        if (!lockSupported()) {
+            lockResult = 'unsupported';
+            return Promise.resolve(lockResult);
         }
+
+        const target = screen.orientation;
+
+        // Полный экран — обязательное условие: без него lock
+        // отклоняется почти всегда.
+        const go = () => Promise.resolve(target.lock('landscape'))
+            .then(() => {
+                lockResult = 'locked';
+                return lockResult;
+            })
+            .catch(() => {
+                lockResult = 'failed';
+                return lockResult;
+            });
+
+        if (document.fullscreenElement) return go();
 
         const el = document.documentElement;
         if (el.requestFullscreen) {
-            Promise.resolve(el.requestFullscreen()).then(go).catch(go);
-        } else {
-            go();
+            return Promise.resolve(el.requestFullscreen())
+                .then(go)
+                // Полный экран могли запретить — тогда хотя бы пробуем
+                // lock как есть.
+                .catch(go);
         }
+        return go();
     }
 
     window.addEventListener('resize', updateRotateGate);
@@ -424,7 +466,8 @@
     if (screen.orientation) {
         screen.orientation.addEventListener('change', updateRotateGate);
     }
-    // Заслонка поверх поля: нажатие на неё и есть тот самый жест.
+    // Заслонка поверх поля: нажатие на неё — запасной путь, если
+    // захват на кнопке «Играть» не прошёл.
     rotateEl.addEventListener('pointerdown', tryLockLandscape);
     updateRotateGate();
 
@@ -633,6 +676,8 @@ setInterval(() => {
             refresh: updateRotateGate,
             lockLandscape: tryLockLandscape,
             shouldRotate,
+            get supported() { return lockSupported(); },
+            get result() { return lockResult; },
         },
     };
 
@@ -702,6 +747,17 @@ setInterval(() => {
     // --- мост к app.js ----------------------------------------------------
 
     window.Game = {
+        /**
+         * Захват альбомной ориентации. Зовётся из app.js **синхронно**
+         * из обработчика нажатия на «Играть»: и полный экран, и lock
+         * требуют жеста, и после любого await он уже истёк.
+         *
+         * Без этого вызова экран поворачивался бы только после второго
+         * тапа — по заслонке, — а на Android, где захват работает, он
+         * и не нужен вовсе: одного нажатия на «Играть» достаточно.
+         */
+        lockLandscape: tryLockLandscape,
+
         begin(msg) {
             you = msg && msg.you;
             active = true;
