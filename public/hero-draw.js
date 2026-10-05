@@ -22,7 +22,7 @@ const { heroOf } = require('./heroes');
  * только потом голова. Если наоборот — ушки уезжают под лицо, и пёс
  * становится неотличим от кошки.
  */
-function drawHero(ctx, index, r, spin) {
+function drawHero(ctx, index, r, spin, outline) {
     const hero = heroOf(index);
 
     ctx.save();
@@ -33,15 +33,37 @@ function drawHero(ctx, index, r, spin) {
     // «не совсем тут», иначе восемь героев выглядят одинаково плотными.
     if (hero.ghost) ctx.globalAlpha = 0.72;
 
-    drawBody(ctx, hero, r);
-    drawTail(ctx, hero, r, spin);
-    drawHead(ctx, hero, r);
+    drawBody(ctx, hero, r, outline);
+    drawTail(ctx, hero, r, spin, outline);
+    drawHead(ctx, hero, r, outline);
     drawFace(ctx, hero, r);
 
     ctx.restore();
 }
 
-function drawBody(ctx, hero, r) {
+/**
+ * Обводка по силуэту.
+ *
+ * Раньше «это мой герой» показывалось ровным белым кругом вокруг игрока.
+ * Круг не имеет отношения к персонажу: у рыцаря он срезает шлем, у
+ * призрака проходит сквозь волнистый подол, и на телефоне это читалось
+ * как чужеродное кольцо, а не как подсветка. Обводить надо **форму**.
+ *
+ * Поэтому цвет и толщина подставляются прямо в обводку силуэтных
+ * фигур — тела, головы, ушей и причёски. Лицо не обводится: это деталь,
+ * а не силуэт, и обводка поверх глаз превратила бы героя в карикатуру.
+ *
+ * Толщина задана в долях радиуса, поэтому на маленьком поле контур
+ * остаётся той же относительной толщины, что на большом.
+ */
+function edge(ctx, r, outline) {
+    if (outline) {
+        ctx.strokeStyle = outline;
+        ctx.lineWidth = Math.max(2, r * 0.15);
+    }
+}
+
+function drawBody(ctx, hero, r, outline) {
     ctx.beginPath();
     ctx.fillStyle = hero.cloth;
 
@@ -61,10 +83,11 @@ function drawBody(ctx, hero, r) {
     }
 
     ctx.fill();
+    edge(ctx, r, outline);
     ctx.stroke();
 }
 
-function drawHead(ctx, hero, r) {
+function drawHead(ctx, hero, r, outline) {
     const hy = -r * 0.28;
 
     ctx.beginPath();
@@ -84,6 +107,7 @@ function drawHead(ctx, hero, r) {
 
     ctx.fillStyle = hero.id === 'knight' ? hero.cloth : hero.skin;
     ctx.fill();
+    edge(ctx, r, outline);
     ctx.stroke();
 
     // Причёска: шапка поверх круглой головы. У рыцаря и робота её нет.
@@ -92,10 +116,12 @@ function drawHead(ctx, hero, r) {
         ctx.arc(0, hy - r * 0.08, r * 0.66, Math.PI * 1.06, Math.PI * 1.94);
         ctx.fillStyle = hero.hair;
         ctx.fill();
+        edge(ctx, r, outline);
+        ctx.stroke();
     }
 }
 
-function drawTail(ctx, hero, r, spin) {
+function drawTail(ctx, hero, r, spin, outline) {
     if (hero.ears) {
         ctx.fillStyle = hero.dark;
 
@@ -106,6 +132,8 @@ function drawTail(ctx, hero, r, spin) {
                 ctx.ellipse(s * r * 0.66, -r * 0.14, r * 0.19, r * 0.42,
                     s * 0.3, 0, Math.PI * 2);
                 ctx.fill();
+                edge(ctx, r, outline);
+                ctx.stroke();
             }
         } else {
             // Кошка: уши торчком треугольниками.
@@ -116,6 +144,8 @@ function drawTail(ctx, hero, r, spin) {
                 ctx.lineTo(s * r * 0.9, -r * 0.42);
                 ctx.closePath();
                 ctx.fill();
+                edge(ctx, r, outline);
+                ctx.stroke();
             }
         }
     }
