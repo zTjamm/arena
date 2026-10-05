@@ -21,7 +21,7 @@
  *      как на двоих: коллизии по цепочкам ломаются именно на плотности.
  */
 
-const { createArena, addPlayer, spawnPoint, step } = require('./game/arena');
+const { T, createArena, addPlayer, spawnPoint, step } = require('./game/arena');
 const { botInput } = require('./game/bot');
 
 let passed = 0;
@@ -64,6 +64,10 @@ const cap = options.cap || 8000;
     ids.forEach((id, i) => {
         const pt = spawnPoint(i, ids.length, size);
         addPlayer(arena, id, { x: pt.x, y: pt.y, bot: true });
+        // Ступень вторая: бот умеет и прыгать, и окаменяться. Иначе он
+        // каждый тик просил бы прыжок, которого у него нет, и счётчик
+        // внизу показывал бы сотни тысяч запросов вместо прыжков.
+        arena.players[i].grade = 2;
     });
 
     let jumps = 0;
@@ -73,15 +77,34 @@ const cap = options.cap || 8000;
     let moves = 0;
     let nonFinite = 0;
 
+    // Кто уже в прыжке и кто уже в камне: по ним считается **начало**
+    // действия, а не каждый тик его длительности.
+    const wasFlying = new Set();
+    const wasStoned = new Set();
+
     for (let i = 0; i < cap && !arena.finished; i++) {
         const inputs = {};
         for (const p of arena.players) {
             if (!p.alive) continue;
             const input = botInput(p, arena);
             inputs[p.id] = input;
-            if (input.jump) jumps++;
-            if (input.stone) stones++;
-            // Толчок без заряда: считаются сами замахи (событие `swing`),
+            // Считаются **состоявшиеся** прыжки и камни, а не тики, в которые бот
+            // их просил. Просьба и действие разошлись, когда скиллы стали
+            // открываться по ступеням: бот держит кнопку постоянно, а
+            // ядро молчит, пока ступени нет. По запросам счётчик показал
+            // 275 тысяч прыжков на тысячу партий.
+            if (p.jumpLeft > 0 && !wasFlying.has(p.id)) {
+                jumps++;
+                wasFlying.add(p.id);
+            } else if (p.jumpLeft <= 0) {
+                wasFlying.delete(p.id);
+            }
+            if (p.stone > 0 && !wasStoned.has(p.id)) {
+                stones++;
+                wasStoned.add(p.id);
+            } else if (p.stone <= 0) {
+                wasStoned.delete(p.id);
+            }
             // а не тики удержания кнопки. Раньше здесь считалось, сколько
             // тиков бот держал кнопку, и называлось это «зарядом» — но
             // удержание тогда и было зарядом, а теперь это просто
@@ -149,7 +172,7 @@ const cap = options.cap || 8000;
     console.log(
         `  на двоих: доиграно ${finished}/${N}, ` +
         `в среднем ${Math.round(totalTicks / Math.max(finished, 1))} тиков ` +
-        `(${(totalTicks / Math.max(finished, 1) / 30).toFixed(1)} с), ` +
+        `(${(totalTicks / Math.max(finished, 1) * T.TICK).toFixed(1)} с), ` +
         `самая длинная ${longest} тиков`
     );
     console.log(
