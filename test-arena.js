@@ -22,8 +22,46 @@
  */
 
 const {
-    T, createArena, addPlayer, spawnPoint, step, marginOf
+    T, createArena: createRaw, addPlayer: addRaw, spawnPoint, step, marginOf, snapshot
 } = require('./game/arena');
+
+/**
+ * Арена для проверок механики.
+ *
+ * Звезда **выключена**. Это оказалось обязательным: игроки в проверках
+ * стоят около центра, а звезда лежит именно там, и за семь секунд
+ * счётчика её успевали подобрать — ступень уезжала за вторую, толчок
+ * становился 450 вместо 300, и проверки базовых величин падали одна за
+ * другой. Поведение при этом было правильным: звезда и должна браться
+ * в счётчик.
+ *
+ * Значит прогрессию нужно проверять намеренно, а не получать в
+ * подарок — см. блок «прогрессия» ближе к концу файла.
+ */
+function createArena(options = {}) {
+    const arena = createRaw(options);
+    arena.star.up = false;
+    arena.star.again = Infinity;
+    return arena;
+}
+
+/**
+ * Игрок для проверок механики.
+ *
+ * Второй и третий скиллы открываются **ступенями прогрессии**, поэтому
+ * голый игрок их не имеет: нажатие молча игнорируется, и проверка падала
+ * бы, не объясняя почему.
+ *
+ * Выдаётся ступень **вторая**, а не максимальная, и это важно. Первые
+ * две ступени только *открывают* скиллы и не меняют их числа. А вот
+ * третья и выше уже меняют: толчок 450 вместо 300, откат прыжка 2.5
+ * вместо 5, камень 450 вместо 300, замах 0.35 вместо 0.7. С максимумом
+ * молча сломались бы все проверки базовых величин.
+ */
+function addPlayer(arena, id, options = {}) {
+    addRaw(arena, id, options);
+    for (const p of arena.players) p.grade = T.GRADE_STONE;
+}
 
 /**
  * Сколько тиков в `seconds`.
@@ -358,7 +396,17 @@ function flyOut(arena, id) {
 
     charged(arena, 'att');
     const me = arena.players[1];
-    while (me.fly > 0) step(arena, {});
+
+    // Циклы ожидания полёта и прыжка ограничены сверху. Без предела
+    // такой цикл зависает навсегда, если состояние не доедет до нуля:
+    // раньше это случалось из-за бага в ядре, где выбывший в полёте
+    // сохранял fly > 0 навсегда. Ограничение превращает такое зависание
+    // в падение проверки с понятным текстом, а не в молчание на
+    // полчаса.
+    let guard = windupTicks(30);
+    while (me.fly > 0 && guard-- > 0) step(arena, {});
+    check('полёт длится конечное время', me.fly === 0,
+        'осталось ' + me.fly.toFixed(1));
 
     const x0 = me.x;
     for (let i = 0; i < 10; i++) step(arena, { me: { x: 1 } });
@@ -370,7 +418,8 @@ function flyOut(arena, id) {
     check('после полёта сразу можно прыгнуть', me.jumpLeft > 0,
         'прыжок ' + me.jumpLeft.toFixed(0));
 
-    while (me.jumpLeft > 0) step(arena, {});
+    guard = windupTicks(30);
+    while (me.jumpLeft > 0 && guard-- > 0) step(arena, {});
     step(arena, { me: { stone: true } });
     check('после полёта сразу можно окаменеть', me.stone > 0,
         'камень ' + me.stone.toFixed(2));
@@ -1267,6 +1316,239 @@ function longRun() {
 
     check('прыжок за край не выбрасывает', arena.players[0].alive === true,
         'запас ' + marginOf(arena.players[0].x, arena.players[0].y, 200).toFixed(1));
+}
+
+
+// --- Прогрессия: звезда, ступени и потолок ---------------------------------
+
+// Здесь арена настоящая: звезда включена, а ступень выставляется руками.
+// В проверках механики звезда выключена, иначе игроки у центра подбирали
+// бы её и ломали базовые величины.
+
+{
+    // Звезда лежит с самого начала партии, чтобы её можно было взять
+    // в счётчик до первого удара.
+    const arena = createRaw({ size: 3000 });
+    addRaw(arena, 'a', { x: 0, y: 0 });
+    addRaw(arena, 'b', { x: 300, y: 0 });
+
+    check('звезда лежит с начала партии', arena.star.up === true,
+        'up = ' + arena.star.up);
+
+    step(arena, {});
+    check('звезда даёт ступень подбором', arena.players[0].grade === 1,
+        'ступень ' + arena.players[0].grade);
+    check('после подбора звезды её нет', arena.star.up === false,
+        'up = ' + arena.star.up);
+
+    // Возврат считается от подбора, а не от появления.
+    const half = windupTicks(T.STAR_RESPAWN / 2);
+    for (let i = 0; i < half; i++) step(arena, {});
+    check('звезда не вернулась сразу', arena.star.up === false,
+        'через ' + (T.STAR_RESPAWN / 2) + ' с up = ' + arena.star.up);
+
+    // Возврат проверяется по событию, а не по флагу: игрок стоит ровно
+    // там, где звезда появится, и подбирает её в тот же тик — это
+    // правильное поведение, но флаг `up` успевает погаснуть.
+    let sawUp = false;
+    for (let i = 0; i < half + 2; i++) {
+        for (const e of step(arena, {})) {
+            if (e.type === 'starUp') sawUp = true;
+        }
+    }
+    check('звезда вернулась через ' + T.STAR_RESPAWN + ' с', sawUp,
+        'событие появления: ' + (sawUp ? 'было' : 'не было'));
+}
+
+{
+    // Потолок: седьмую ступень не дают, и звезда остаётся на поле.
+    const arena = createRaw({ size: 3000 });
+    addRaw(arena, 'a', { x: 0, y: 0 });
+    arena.players[0].grade = T.FRAG_MAX;
+
+    step(arena, {});
+    check('потолок не превышается', arena.players[0].grade === T.FRAG_MAX,
+        'ступень ' + arena.players[0].grade);
+    check('на потолке звезда остаётся на поле', arena.star.up === true,
+        'up = ' + arena.star.up);
+}
+
+{
+    // Второй и третий скиллы закрыты, пока ступень не взята.
+    const arena = createRaw({ size: 3000 });
+    addRaw(arena, 'a', { x: -500, y: 0 });
+    arena.star.up = false;
+    arena.star.again = Infinity;
+    arena.players[0].dirx = 1;
+    for (let i = 0; i < windupTicks(T.SPAWN_GRACE + 1); i++) step(arena, {});
+
+    step(arena, { a: { x: 1, jump: true, stone: true, push: true } });
+    check('без ступени прыжок не работает', arena.players[0].jumpLeft === 0,
+        'прыжок ' + arena.players[0].jumpLeft);
+    check('без ступени камень не работает', arena.players[0].stone === 0,
+        'камень ' + arena.players[0].stone);
+    check('толчок работает без ступени', arena.players[0].cooldowns.push > 0,
+        'откат ' + arena.players[0].cooldowns.push);
+}
+
+{
+    // Первая ступень открывает прыжок, но не камень.
+    const arena = createRaw({ size: 3000 });
+    addRaw(arena, 'a', { x: -500, y: 0 });
+    arena.star.up = false;
+    arena.star.again = Infinity;
+    arena.players[0].dirx = 1;
+    arena.players[0].grade = T.GRADE_JUMP;
+    for (let i = 0; i < windupTicks(T.SPAWN_GRACE + 1); i++) step(arena, {});
+
+    step(arena, { a: { x: 1, jump: true, stone: true } });
+    check('первая ступень открывает прыжок', arena.players[0].jumpLeft > 0,
+        'прыжок ' + arena.players[0].jumpLeft);
+    check('первая ступень не открывает камень', arena.players[0].stone === 0,
+        'камень ' + arena.players[0].stone);
+}
+
+{
+    // Вторая ступень открывает камень.
+    const arena = createRaw({ size: 3000 });
+    addRaw(arena, 'a', { x: -500, y: 0 });
+    arena.star.up = false;
+    arena.star.again = Infinity;
+    arena.players[0].dirx = 1;
+    arena.players[0].grade = T.GRADE_STONE;
+    for (let i = 0; i < windupTicks(T.SPAWN_GRACE + 1); i++) step(arena, {});
+
+    step(arena, { a: { x: 1, stone: true } });
+    check('вторая ступень открывает камень', arena.players[0].stone > 0,
+        'камень ' + arena.players[0].stone);
+}
+
+/**
+ * Отмерить отлёт толчка при заданной ступени.
+ *
+ * Две арены строятся одинаково, различается только ступень бьющего —
+ * так сравнение идёт по одному и тому же коду, а не по двум веткам.
+ */
+function pushFly(grade) {
+    const arena = createRaw({ size: 3000 });
+    addRaw(arena, 'a', { x: 0, y: 0 });
+    addRaw(arena, 'b', { x: 70, y: 0 });
+    arena.star.up = false;
+    arena.star.again = Infinity;
+    arena.players[0].dirx = 1;
+    arena.players[0].grade = grade;
+    for (let i = 0; i < windupTicks(T.SPAWN_GRACE + 1); i++) step(arena, {});
+
+    const from = [arena.players[1].x, arena.players[1].y];
+    for (let i = 0; i < Math.ceil(T.PUSH_WINDUP / T.TICK) + 1; i++) {
+        step(arena, { a: { push: true } });
+    }
+    for (let i = 0; i < windupTicks(4); i++) step(arena, {});
+    return Math.hypot(arena.players[1].x - from[0], arena.players[1].y - from[1]);
+}
+
+{
+    const plain = pushFly(T.GRADE_JUMP);
+    const powered = pushFly(T.GRADE_PUSH_POWER);
+
+    check('без третьей ступени толчок около 300',
+        Math.abs(plain - T.PUSH_DIST) < 25,
+        'отлетел ' + plain.toFixed(0));
+    check('третья ступень усиливает толчок',
+        powered > plain * 1.3 && powered < plain * 1.7,
+        plain.toFixed(0) + ' -> ' + powered.toFixed(0));
+}
+
+{
+    // Четвёртая ступень: откат прыжка вдвое короче.
+    const arena = createRaw({ size: 3000 });
+    addRaw(arena, 'a', { x: -500, y: 0 });
+    arena.star.up = false;
+    arena.star.again = Infinity;
+    arena.players[0].dirx = 1;
+    arena.players[0].grade = T.GRADE_JUMP_COOLDOWN;
+    for (let i = 0; i < windupTicks(T.SPAWN_GRACE + 1); i++) step(arena, {});
+
+    step(arena, { a: { x: 1, jump: true } });
+    const cd = arena.players[0].cooldowns.jump;
+    check('четвёртая ступень режет откат прыжка вдвое',
+        Math.abs(cd - T.JUMP_COOLDOWN / T.STAR_COOLDOWN_HALF) < 0.05,
+        'откат ' + cd.toFixed(2) + ', ожидалось '
+        + (T.JUMP_COOLDOWN / T.STAR_COOLDOWN_HALF).toFixed(2));
+}
+
+{
+    // Пятая ступень: камень отбрасывает в полтора раза дальше.
+    const arena = createRaw({ size: 3000 });
+    addRaw(arena, 'a', { x: 0, y: 0 });
+    addRaw(arena, 'b', { x: 100, y: 0 });
+    arena.star.up = false;
+    arena.star.again = Infinity;
+    arena.players[0].grade = T.GRADE_STONE_POWER;
+    const from = arena.players[1].x;
+    step(arena, { a: { stone: true } });
+    for (let i = 0; i < windupTicks(T.STONE_TIME + 0.3); i++) step(arena, {});
+    for (let i = 0; i < windupTicks(T.STONE_BURST * 2 + 1); i++) step(arena, {});
+    const moved = arena.players[1].x - from;
+    check('пятая ступень усиливает камень',
+        moved > T.STONE_BURST * 1.3 && moved < T.STONE_BURST * 1.7,
+        'сдвинули на ' + moved.toFixed(0) + ', база ' + T.STONE_BURST);
+}
+
+{
+    // Шестая ступень: замах вдвое короче. Не «без замаха»: замах здесь не
+    // анимация, а всё обязательство удара, и обнулять его нельзя.
+    const arena = createRaw({ size: 3000 });
+    addRaw(arena, 'a', { x: -500, y: 0 });
+    arena.star.up = false;
+    arena.star.again = Infinity;
+    arena.players[0].dirx = 1;
+    arena.players[0].grade = T.GRADE_PUSH_WINDUP;
+    for (let i = 0; i < windupTicks(T.SPAWN_GRACE + 1); i++) step(arena, {});
+
+    step(arena, { a: { push: true } });
+    const swing = arena.players[0].swing;
+    check('шестая ступень режет замах вдвое',
+        Math.abs(swing - T.PUSH_WINDUP / T.STAR_WINDUP_HALF) < 0.02,
+        'замах ' + swing.toFixed(3) + ', ожидалось '
+        + (T.PUSH_WINDUP / T.STAR_WINDUP_HALF).toFixed(3));
+    check('замах не обнуляется совсем', swing > 0.1,
+        'замах ' + swing.toFixed(3));
+}
+
+{
+    // Вылет даёт ступень тому, кто выбил.
+    const arena = createRaw({ size: 200 });
+    addRaw(arena, 'a', { x: 0, y: 0 });
+    addRaw(arena, 'b', { x: 60, y: 0 });
+    arena.star.up = false;
+    arena.star.again = Infinity;
+    arena.players[0].dirx = 1;
+    arena.players[0].grade = T.GRADE_PUSH_POWER;
+    for (let i = 0; i < windupTicks(T.SPAWN_GRACE + 1); i++) step(arena, {});
+
+    for (let i = 0; i < Math.ceil(T.PUSH_WINDUP / T.TICK) + 1; i++) {
+        step(arena, { a: { push: true } });
+    }
+    for (let i = 0; i < windupTicks(4); i++) step(arena, {});
+
+    check('вылет дал ступень убийце',
+        arena.players[1].alive === false
+        && arena.players[0].grade === T.GRADE_PUSH_POWER + 1,
+        'жив ' + arena.players[1].alive + ', ступень ' + arena.players[0].grade);
+}
+
+{
+    // Снимок несёт ступень и состояние звезды: без них клиент не нарисует
+    // ни звёздочек над игроком, ни саму звезду.
+    const arena = createRaw({ size: 3000 });
+    addRaw(arena, 'a', { x: 0, y: 0 });
+    const snap = snapshot(arena);
+    check('в снимке есть ступень', snap.players[0].grade === 0,
+        'grade = ' + snap.players[0].grade);
+    check('в снимке есть звезда',
+        snap.star && snap.star.up === true && snap.star.x === 0,
+        JSON.stringify(snap.star));
 }
 
 

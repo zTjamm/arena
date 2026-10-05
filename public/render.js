@@ -622,7 +622,10 @@ function drawPlayer(ctx, snap, view, p, index, opts, now) {
         // волнистый подол призрака и на телефоне читался как чужеродное
         // кольцо.
         const mine = opts.me != null && p.id === opts.me;
-        drawHero(ctx, index, r, spin, mine ? goldPulse(now) : null);
+    drawHero(ctx, index, r, spin, mine ? goldPulse(now) : null);
+
+    // Звёздочки ступеней — только свои.
+    drawGrades(ctx, sx, sy, p, r, opts);
 
         // Прыгающий подсвечивается контуром: неуязвимость — это
         // обещание, и оно должно быть видно, а не выводиться из
@@ -1094,6 +1097,90 @@ function drawBurstFx(ctx, view, snap, fx, now) {
  * opts.bursts  — взрывы камня [{ x, y, radius, at }];
  * opts.spin    — секунды для качания хвостов и мигания звёзд.
  */
+/**
+ * Звезда в центре поля.
+ *
+ * Рисуется только когда лежит. Если звезды нет, на её месте должен быть
+ * виден пустой центр, а не просто пропавший предмет — иначе непонятно,
+ * куда идти. Пока лежит, мигает; пока её нет, растёт тонкое кольцо
+ * обратного отсчёта, и в момент полного размера звезда появляется: обе
+ * вещи совпадают по времени, и глаз ловит связь.
+ *
+ * Форма та же, что у звёздочек перезарядки, но втрое крупнее: это
+ * предмет мира, а не индикатор.
+ */
+function drawStar(ctx, view, snap, now) {
+    const st = snap.star;
+    if (!st) return;
+
+    const x = view.cx + st.x * view.scale;
+    const y = view.cy + st.y * view.scale;
+    const s = Math.max(9, T.PLAYER_RADIUS * view.scale * 0.95);
+
+    ctx.save();
+
+    if (st.up) {
+        // Свечение: на тёмном поле без него звезда теряется среди
+        // восьми героев, а она единственный предмет на карте.
+        const glow = ctx.createRadialGradient(x, y, 0, x, y, s * 2.8);
+        glow.addColorStop(0, 'rgba(255,226,122,0.32)');
+        glow.addColorStop(1, 'rgba(255,226,122,0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(x, y, s * 2.8, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = 0.72 + 0.28 * Math.abs(Math.sin(now / 340));
+        starPath(ctx, x, y, s, s * 0.46);
+        ctx.fillStyle = '#ffe27a';
+        ctx.fill();
+        ctx.lineWidth = Math.max(1.5, s * 0.15);
+        ctx.strokeStyle = 'rgba(120,80,0,0.5)';
+        ctx.stroke();
+    } else {
+        const left = Math.max(0, (st.again || 0) - (snap.elapsed || 0));
+        const frac = T.STAR_RESPAWN > 0
+            ? Math.max(0, Math.min(1, 1 - left / T.STAR_RESPAWN))
+            : 1;
+
+        ctx.globalAlpha = 0.45;
+        ctx.setLineDash([3, 4]);
+        ctx.lineWidth = Math.max(1, view.scale * 2);
+        ctx.strokeStyle = 'rgba(255,226,122,0.6)';
+        ctx.beginPath();
+        ctx.arc(x, y, s * (0.3 + frac * 0.7), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+}
+
+/**
+ * Звёздочки ступеней над своим героем.
+ *
+ * Только у себя: чужие ступени были бы шумом на поле, а своей
+ * прогрессии видеть надо. Ровно столько, сколько набрано, — потолок
+ * виден тем, что шесть звёздочек занимают больше места, чем пять.
+ */
+function drawGrades(ctx, sx, sy, p, radius, opts) {
+    if (opts.me == null || p.id !== opts.me) return;
+    const grade = p.grade || 0;
+    if (grade <= 0) return;
+
+    const s = Math.max(2.2, radius * 0.2);
+    const gap = s * 2.7;
+    const baseY = sy - radius - s * 5.4;
+
+    ctx.save();
+    for (let i = 0; i < grade; i++) {
+        starPath(ctx, sx + (i - (grade - 1) / 2) * gap, baseY, s, s * 0.45);
+        ctx.fillStyle = '#ffe27a';
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
 function draw(ctx, snap, view, opts = {}) {
     ctx.save();
     ctx.fillStyle = opts.bg || BG;
@@ -1124,6 +1211,11 @@ function draw(ctx, snap, view, opts = {}) {
     for (const p of snap.players) {
         if (p.alive && p.stone > 0) drawStoneZone(ctx, view, snap, p);
     }
+
+    // Звезда — тоже под героями. Она лежит в центре, то есть ровно там,
+    // где сходятся все, и нарисованная сверху перекрывала бы того, кто
+    // за ней идёт.
+    drawStar(ctx, view, snap, performance.now());
 
     // Тот же расчёт уходит в drawPlayer: веер подсвечивается по
     // наличию цели, а не по чему-то отдельному.

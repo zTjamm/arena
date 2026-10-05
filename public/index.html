@@ -735,6 +735,26 @@
 
     #buttons button.held { filter: brightness(1.5); transform: scale(0.95); }
 
+    /* Закрытый скилл: кнопка остаётся на месте, но гаснет и над ней
+       появляется звезда. Прятать её нельзя — исчезнувшая кнопка ничего
+       не сообщает о том, что скилл существует и его можно открыть.
+       Ядро нажатие всё равно проигнорирует, здесь только картинка. */
+    #buttons button.locked {
+        opacity: 0.34;
+        filter: grayscale(0.7);
+    }
+
+    #buttons button.locked::after {
+        content: '★';
+        position: absolute;
+        top: -8px;
+        right: -4px;
+        font-size: 15px;
+        line-height: 1;
+        color: rgba(255, 226, 122, 0.9);
+        text-shadow: 0 0 6px rgba(0, 0, 0, 0.8);
+    }
+
     /* Кнопки ужимаются на низком экране, а джойстику править ничего не
        нужно: он уже считается от высоты сам. */
     @media (max-height: 460px) {

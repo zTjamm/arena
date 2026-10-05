@@ -375,6 +375,24 @@
     bindSkill('btnJump', (v) => { btnJump = v; });
     bindSkill('btnStone', (v) => { btnStone = v; });
 
+    /**
+     * Закрытые скиллы гасятся, но **не прячутся**.
+     *
+     * Кнопка, которой нет, ничего не сообщает: игрок не знает, что скилл
+     * вообще бывает и что его можно открыть. Приглушённая кнопка с
+     * звездой говорит сразу: «есть, но ещё не заслужено». Ядро нажатие
+     * всё равно проигнорирует — здесь только честная картинка.
+     */
+    function applySkillLocks() {
+        const me = findMe(lastSnap);
+        const grade = me ? (me.grade || 0) : 0;
+
+        const jump = document.getElementById('btnJump');
+        const stone = document.getElementById('btnStone');
+        if (jump) jump.classList.toggle('locked', grade < T.GRADE_JUMP);
+        if (stone) stone.classList.toggle('locked', grade < T.GRADE_STONE);
+    }
+
     // --- режим управления -------------------------------------------------
 
     let touchMode = window.matchMedia('(pointer: coarse)').matches;
@@ -810,6 +828,11 @@ setInterval(() => {
     }
 
     function updatePanel() {
+    // Кнопки закрытых скиллов гаснут по ступени — и обновляются здесь
+        // же, потому что это единственное место, которое уже вызывается
+        // каждый кадр.
+        applySkillLocks();
+
         // Панель — только результат: живую партию ничем не закрывают.
         if (!active || !finished) {
             panel.style.display = 'none';
@@ -1068,6 +1091,16 @@ setInterval(() => {
                     // важное событие партии, и почувствовать его надо
                     // спиной, а не только увидеть.
                     if (e.hits && e.hits.indexOf(you) >= 0) Sound.buzz(45);
+                    continue;
+                }
+
+                // Звезда: поднятие даёт ступень. Событие приходит и за
+                // подбором звезды, и за вылет — ядро шлёт одно и то же.
+                if (e.type === 'star') {
+                    if (e.by === you) {
+                        Sound.sfx.star();
+                        Sound.buzz(18);
+                    }
                     continue;
                 }
 

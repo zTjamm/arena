@@ -111,7 +111,18 @@ const T = {
     // камень в это время работают — «невозможно атаковать» значит
     // именно нельзя ударить, а уйти с края или прикинуться камнем
     // по-прежнему можно.
-    SPAWN_GRACE: 3,
+    // Первые семь секунд партии удара нет: см. applyPushes. Прыжок и
+    // камень в это время работают — «невозможно атаковать» значит
+    // именно нельзя ударить, а уйти с края или прикинуться камнем
+    // по-прежнему можно.
+    //
+    // Было три секунды, стало семь: счётчик нужен, чтобы взять первую
+    // звезду до начала драки. Иначе лестница начинается с боя, где
+    // первую ступень берут уже из-под удара, а измеренные 100%
+    // гарантии на первую ступень как раз и держатся на этом запасе
+    // времени. Заодно замер показал, что медианный игрок живёт 10 секунд,
+    // и три секунды из них теперь уходят на подготовку.
+    SPAWN_GRACE: 7,
 
     // Поворот. Раньше взгляд прыгал на новое направление мгновенно,
     // и на восьми героях это читалось как рывок носа: удар уходил туда,
@@ -316,6 +327,36 @@ const T = {
     // заметно, но не превращает толчок в спам по кнопке.
     PUSH_COOLDOWN_ON_HIT: 2,  // во сколько раз срезается остаток
 
+    // Звезда в центре поля: поднял — получил ступень, через 5 секунд
+    // вернулась. Возврат считается **от подъёма**, а не от появления,
+    // поэтому если её никто не берёт, она просто лежит и ждёт.
+    //
+    // Именно звезда, а не вылеты, делает лестницу живой. Замер на
+    // 60 партиях, сколько партий доходит до ступени:
+    //
+    //   только за вылеты:      1 -> 100%, 4 -> 14%, 5 -> 0%,  6 -> 0%
+    //   плюс звезда:           1 -> 100%, 4 -> 55%, 5 -> 33%, 6 -> 7%
+    //   звезду ищут четверо:   4 -> 80%, 5 -> 52%, 6 -> 30%
+    //
+    // Причина простая: вылетов на партию ровно семь, а медианный игрок
+    // живёт 10 секунд, и лидер набирает 3–4. А звезд за партию успевает
+    // появиться около шести, и достаются они тому, кто дожил.
+    FRAG_MAX: 6,             // ступеней всего, дальше не растёт
+    STAR_RESPAWN: 5,         // секунд между подъёмами
+    STAR_PICKUP: 46,         // радиус подбора: чуть шире героя
+    STAR_POWER: 1.5,         // во столько раз сильнее толчок и камень
+    STAR_COOLDOWN_HALF: 2,   // во сколько раз короче откат прыжка
+    STAR_WINDUP_HALF: 2,     // во сколько раз короче замах толчка
+
+    // Порядок ступеней. Каждая следующая открывает то, чего раньше не
+    // было: сначала второй скилл, потом третий, потом усиления.
+    GRADE_JUMP: 1,
+    GRADE_STONE: 2,
+    GRADE_PUSH_POWER: 3,
+    GRADE_JUMP_COOLDOWN: 4,
+    GRADE_STONE_POWER: 5,
+    GRADE_PUSH_WINDUP: 6,
+
     ITERATIONS: 4,         // проходов разводки за тик: цепочки выдавливания
 
     // Тик поднят с 30 на 60 Гц. Долго это был главный источник
@@ -352,6 +393,39 @@ function approach(current, target, maxDelta) {
     if (d > maxDelta) return current + maxDelta;
     if (d < -maxDelta) return current - maxDelta;
     return target;
+}
+
+/**
+ * Достиг ли игрок ступени.
+ *
+ * Порог именно «меньше чем», а не «равно или больше»: ступень шесть
+ * обрезана, и игрок, который её взял, обязан получить укороченный
+ * замах. Если бы сравнение было `<`, седьмой ступени не существовало
+ * бы вовсе, а `FRAG_MAX` был бы недостижим.
+ */
+function gradeOf(p, stage) {
+    return (p.grade || 0) >= stage;
+}
+
+/** Сила отброса толчка с учётом ступени. */
+function pushDistOf(p) {
+    return T.PUSH_DIST * (gradeOf(p, T.GRADE_PUSH_POWER) ? T.STAR_POWER : 1);
+}
+
+/** Длительность замаха с учётом ступени. */
+function windupOf(p) {
+    return T.PUSH_WINDUP / (gradeOf(p, T.GRADE_PUSH_WINDUP) ? T.STAR_WINDUP_HALF : 1);
+}
+
+/** Откат прыжка с учётом ступени. */
+function jumpCooldownOf(p) {
+    return T.JUMP_COOLDOWN / (gradeOf(p, T.GRADE_JUMP_COOLDOWN)
+        ? T.STAR_COOLDOWN_HALF : 1);
+}
+
+/** Сила отброса камня с учётом ступени. */
+function stoneBurstOf(p) {
+    return T.STONE_BURST * (gradeOf(p, T.GRADE_STONE_POWER) ? T.STAR_POWER : 1);
 }
 
 /**
@@ -411,6 +485,11 @@ function createArena(options = {}) {
         // автор -> { count, power }. Закрывается, когда последний
         // участник долетел (см. closeChain).
         chains: new Map(),
+
+        // Звезда в центре. Лежит с самого начала партии, чтобы её можно
+        // было взять в счётчик до первого удара. `again` — момент
+        // возврата, отсчёт идёт от подъёма (см. updateStar).
+        star: { x: 0, y: 0, up: true, again: 0 },
     };
 }
 
@@ -435,6 +514,12 @@ function addPlayer(arena, id, options = {}) {
         // с нажатием и включает время самого камня: иначе звездочка
         // мигала бы ровно тогда, когда камень стоит.
         cooldowns: { push: 0, jump: 0, stone: 0 },
+
+        // Ступень прогрессии, 0…6. С неё открываются второй и третий
+        // скиллы и усиления первых. `graded` — вылет уже засчитан,
+        // чтобы один и тот же вылет не давал ступень дважды.
+        grade: 0,
+        graded: false,
 
         // Прыжок: сколько единиц осталось пролететь. Ноль — не прыгает.
         jumpLeft: 0,
@@ -670,7 +755,11 @@ function applyPushes(arena, inputs, dt) {
         if (!input.push) continue;
         if (arena.elapsed < T.SPAWN_GRACE) continue;
 
-        p.swing = T.PUSH_WINDUP;
+        // Шестая ступень режет замах вдвое. Раньше это стоило ноль замаха,
+        // и это было бы ошибкой: замах здесь не анимация, а всё
+        // обязательство удара. Половинный замах сохраняет его и
+        // при этом ощутимо дешевле.
+        p.swing = windupOf(p);
         p.cooldowns.push = T.PUSH_COOLDOWN;
         arena.events.push({ type: 'swing', by: p.id, dirx: p.dirx, diry: p.diry });
     }
@@ -685,7 +774,11 @@ function applyPushes(arena, inputs, dt) {
  * остаться там, куда действительно били.
  */
 function landPush(arena, pusher) {
-    const res = strike(arena, pusher, T.PUSH_DIST);
+    // Ступень три усиливает толчок, и отброс берётся из неё, а не из
+    // константы. Так же и замах: шестая ступень режет его вдвое, и
+    // обе величины считаются здесь, из одного места.
+    const dist = pushDistOf(pusher);
+    const res = strike(arena, pusher, dist);
 
     // Попадание срезает остаток перезарядки. Считается и отскок от
     // камня: он тоже означает, что удар кого-то достал, и по ощущению
@@ -700,7 +793,7 @@ function landPush(arena, pusher) {
         by: pusher.id,
         dirx: Math.round(pusher.dirx * 1000) / 1000,
         diry: Math.round(pusher.diry * 1000) / 1000,
-        dist: T.PUSH_DIST,
+        dist,
         hits: res.hits,
         bounce: res.bounce,
     });
@@ -721,6 +814,11 @@ function burstStones(arena) {
         if (!p.burst) continue;
         p.burst = false;
 
+        // Пятая ступень усиливает камень: отброс в полтора раза.
+        // Сила берётся из владельца камня, а не из константы, иначе
+        // усиление было бы у всех сразу.
+        const burst = stoneBurstOf(p);
+
         const hit = [];
         for (const o of arena.players) {
             if (!o.alive || o.id === p.id) continue;
@@ -738,7 +836,7 @@ function burstStones(arena) {
                 ux = dx / d;
                 uy = dy / d;
             }
-            send(arena, o, T.STONE_BURST, ux, uy, p.id, T.STONE_BURST);
+            send(arena, o, burst, ux, uy, p.id, burst);
             hit.push(o.id);
         }
 
@@ -906,7 +1004,11 @@ function applySkills(arena, inputs) {
         // совместить два несовместимых решения.
         if (p.swing > 0) continue;
 
-        if (input.stone && p.cooldowns.stone <= 0 && p.jumpLeft <= 0) {
+        // Камень открывается второй ступенью. Нажатие раньше срока молча
+        // игнорируется, а не отвергается: иначе игрок, не понимающий,
+        // что скилл ещё закрыт, решит, что кнопка сломалась.
+        if (input.stone && gradeOf(p, T.GRADE_STONE)
+            && p.cooldowns.stone <= 0 && p.jumpLeft <= 0) {
             p.stone = T.STONE_TIME;
             // Откат отсчитывается от нажатия, а не от конца камня:
             // так «перезарядка 7 секунд» — буквально семь секунд от
@@ -921,10 +1023,16 @@ function applySkills(arena, inputs) {
             continue;
         }
 
-        if (input.jump && p.cooldowns.jump <= 0 && p.jumpLeft <= 0 && p.stone <= 0
+        // Прыжок открывается первой ступенью. Замер показал, что до
+        // прогрессии он был почти мёртв: 0.6 нажатия за партию на
+        // игрока при доступных пяти. Теперь это первая награда, и
+        // кнопка появляется вместе с первой взятой звездой.
+        if (input.jump && gradeOf(p, T.GRADE_JUMP)
+            && p.cooldowns.jump <= 0 && p.jumpLeft <= 0 && p.stone <= 0
             && (p.dirx || p.diry)) {
             p.jumpLeft = T.JUMP_DISTANCE;
-            p.cooldowns.jump = T.JUMP_COOLDOWN;
+            // Четвёртая ступень режет откат вдвое.
+            p.cooldowns.jump = jumpCooldownOf(p);
             p.jumpx = p.dirx;
             p.jumpy = p.diry;
         }
@@ -1204,6 +1312,20 @@ function applyBounds(arena) {
         p.eliminatedAt = arena.elapsed;
         place--;
 
+        // Полёт обнуляется вместе с жизнью. Иначе выбывший навсегда
+        // остаётся с `fly > 0`, и любой, кто ждёт конца полёта, будет
+        // ждать вечно: мёртвые игроки не участвуют в шаге, поэтому
+        // счётчик больше не уменьшается.
+        //
+        // На тестах это выходило как зависание на проверке «прыжок летит
+        // ровно 300 единиц», но баг был не в тесте: он кружил по
+        // вылету за край, который до этого просто не случался настолько
+        // часто. Причиной стало усиление толчка до 450 — игроки стали
+        // вылетать в полёте, и состояние залипало.
+        p.fly = 0;
+        p.vx = 0;
+        p.vy = 0;
+
         arena.events.push({
             type: 'eliminated',
             id: p.id,
@@ -1278,9 +1400,83 @@ function step(arena, inputs = {}, dt = T.TICK) {
     resolveCollisions(arena);
     closeChains(arena);
     applyBounds(arena);
+
+    // Звезда и вылеты — после разводки столкновений и границ: игрок,
+    // которого только что вынесли за край, уже не должен получить
+    // награду за это.
+    updateStar(arena);
+    grantKillGrades(arena);
+
     checkFinish(arena);
 
     return arena.events;
+}
+
+/**
+ * Звезда в центре поля и её возврат.
+ *
+ * Возврат считается **от подъёма**, а не от появления. Если бы он
+ * считался от появления, звезда, которую никто не взял, исчезала бы
+ * через 5 секунд впустую, и середина поля была бы мёртвой большую
+ * часть партии.
+ */
+function updateStar(arena) {
+    if (arena.star.up) {
+        for (const p of alivePlayers(arena)) {
+            // Прыгающий и летящий звёздой не берут: подбор стоит
+            // находиться на месте, иначе она снималась бы прямо в
+            // воздухе на пути к ней.
+            if (p.fly > 0 || p.jumpLeft > 0) continue;
+            if (Math.hypot(p.x - arena.star.x, p.y - arena.star.y) > T.STAR_PICKUP) {
+                continue;
+            }
+            if (!addGrade(arena, p)) break;   // потолок: звезда остаётся
+            arena.star.up = false;
+            arena.star.again = arena.elapsed + T.STAR_RESPAWN;
+            arena.events.push({ type: 'star', by: p.id, grade: p.grade });
+            break;
+        }
+        return;
+    }
+
+    if (arena.elapsed >= arena.star.again) {
+        arena.star.up = true;
+        arena.events.push({ type: 'starUp' });
+    }
+}
+
+/**
+ * Вылет тоже даёт ступень.
+ *
+ * Именно вылеты, а не попадания: иначе награда шла бы и за удар в
+ * молоко, и лестница превращалась бы в счётчик нажатий.
+ */
+function grantKillGrades(arena) {
+    for (const p of arena.players) {
+        if (p.alive || p.graded) continue;
+        p.graded = true;
+        const by = p.eliminatedBy;
+        if (by == null) continue;
+        const killer = arena.players.find(q => q.id === by);
+        if (!killer) continue;
+        if (addGrade(arena, killer)) {
+            arena.events.push({ type: 'star', by: killer.id, grade: killer.grade });
+        }
+    }
+}
+
+/**
+ * Добавить ступень. Возвращает false, если потолок уже взят.
+ *
+ * Потолок не обрезает уже набранное: игрок, взявший шестую ступень,
+ * получает укороченный замах, а седьмую просто не получает. Поэтому
+ * звезда в этом случае **остаётся на поле** — иначе игрок у максимума
+ * втайне вскрывал бы пустое место, думая, что это полезно.
+ */
+function addGrade(arena, p) {
+    if ((p.grade || 0) >= T.FRAG_MAX) return false;
+    p.grade = (p.grade || 0) + 1;
+    return true;
 }
 
 /**
@@ -1418,6 +1614,16 @@ function snapshot(arena) {
         // узнает, кто именно и кем вылетел.
         events: arena.events.map(e => ({ ...e })),
 
+        // Звезда: лежит ли и когда вернётся. Клиенту нужно и то, и
+        // другое — без времени возврата не показать обратный отсчёт,
+        // а без самого факта «лежит» нечем объяснить пустую середину.
+        star: {
+            x: arena.star.x,
+            y: arena.star.y,
+            up: arena.star.up,
+            again: Math.round(arena.star.again * 10) / 10,
+        },
+
         players: arena.players.map(p => ({
             id: p.id,
             x: Math.round(p.x * 100) / 100,
@@ -1444,6 +1650,10 @@ function snapshot(arena) {
             // сжимающееся кольцо, а во время замаха ещё и считает, кто
             // попадёт под удар, — обе вещи из этого одного поля.
             swing: Math.round(p.swing * 100) / 100,
+
+            // Ступень прогрессии: клиент по ней и показывает звёздочки
+            // над игроком, и решает, какие кнопки доступны.
+            grade: p.grade || 0,
 
             // Полёт — остаток в единицах. Ноль означает «не летит».
             fly: Math.round(p.fly),
