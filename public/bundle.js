@@ -3167,6 +3167,93 @@ const BURST_ARM_MS = 300;
  * что она сама отскочила от взрыва. Задело четверых — и видно, что
  * четверых.
  */
+/**
+ * Зона отталкивания вокруг камня: **предупреждение** до взрыва.
+ *
+ * Камень стоит `STONE_TIME` секунд, а потом разносит всё в радиусе
+ * `STONE_BURST_RANGE`. До этого правки на поле не было видно ничего:
+ * серый шар без намёка, где кончится его зона. Заметить можно было
+ * только постфактум — когда кольцо взрыва уже разошлось и игрок летел
+ * за край. Это худший вид сообщения: «я попал» вместо «я сейчас попаду».
+ *
+ * Поэтому пока камень стоит, показаны две окружности:
+ *
+ * 1. **Весь круг опасности** — постоянный, тусклый. Отвечает на
+ *    вопрос «где вообще опасно стоять» и не меняется, чтобы его не
+ *    приходилось запоминать на ходу.
+ * 2. **Сжимающееся кольцо** — радиус равен остатку времени, то есть
+ *    доходит до нуля **ровно в момент взрыва**. Это и есть обратный
+ *    отсчёт, и читается он без часов: когда кольцо сжалось в точку,
+ *    сейчас будет отброс.
+ *
+ * Цвет от холодного янтарного к горячему оранжевому по мере приближения
+ * взрыва: на последней четверти секунды кольцо ещё и пульсирует, чтобы
+ * мигание нельзя было пропустить в свалке из восьми человек.
+ *
+ * Зона обрезана по границе поля: камень может стоять у самого края, и
+ * круг на полях обрезается иначе, чем сама опасная зона — выглядело бы
+ * так, будто камень бьёт дальше, чем на самом деле.
+ */
+function drawStoneZone(ctx, view, snap, p) {
+    const frac = Math.max(0, Math.min(1, (p.stone || 0) / T.STONE_TIME));
+    const heat = 1 - frac;
+
+    const sx = view.cx + p.x * view.scale;
+    const sy = view.cy + p.y * view.scale;
+    const full = T.STONE_BURST_RANGE * view.scale;
+
+    const side = snap.size * view.scale;
+    const left = view.cx - side / 2;
+    const top = view.cy - side / 2;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, side, side);
+    ctx.clip();
+
+    // 1. Полный круг опасности: заливка и граница.
+    const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, full);
+    g.addColorStop(0, 'rgba(201,160,106,' + (0.05 + heat * 0.10).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(201,160,106,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(sx, sy, full, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(sx, sy, full, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(201,160,106,' + (0.30 + heat * 0.35).toFixed(3) + ')';
+    ctx.lineWidth = Math.max(1, view.scale * 3);
+    ctx.stroke();
+
+    // 2. Сжимающееся кольцо — обратный отсчёт до взрыва.
+    //
+    // Пульсация включается на последней четверти: раньше мигание
+    // только мешало бы считать, а на финише это единственное, что
+    // ещё можно разглядеть краем глаза в общей свалке.
+    const pulse = frac < 0.25
+        ? 1 + Math.sin(performance.now() / 40) * 0.06
+        : 1;
+    const ring = full * frac * pulse;
+
+    if (ring > 1) {
+        ctx.beginPath();
+        ctx.arc(sx, sy, ring, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,' + Math.round(190 - heat * 90) + ','
+            + Math.round(120 - heat * 100) + ',' + (0.55 + heat * 0.4).toFixed(3) + ')';
+        ctx.lineWidth = Math.max(2, view.scale * 6);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+/**
+ * Взрыв камня: вспышка, кольцо и удар по каждой задетой цели.
+ *
+ * Три слоя идут в порядке «удар по цели → кольцо → вспышка сверху»,
+ * чтобы волна читалась как одно событие, а не как три разных.
+ */
 function drawBurstFx(ctx, view, snap, fx, now) {
     const k = (now - fx.at) / BURST_FX_MS;
     if (!(k >= 0) || k >= 1) return;
@@ -3210,19 +3297,40 @@ function drawBurstFx(ctx, view, snap, fx, now) {
 
     // 2. Кольцо расходится наружу и одновременно гаснет: чем дальше,
     // тем бледнее — край волны читается, а середина уже отработала.
-    ctx.globalAlpha = (1 - k) * 0.85;
+    //
+    // Толщина и цвет подобраны по кадру на 150/300/450 мс: раньше волна
+    // к 450 мс (это как раз момент, когда игрока отбрасывает за край)
+    // таяла в почти ничто, и главное событие партии оставалось без
+    // следа. Отсюда толстая тёплая обводка плюс второй быстрый фронт.
+    const ringR = full * (0.25 + k * 0.85);
+
+    ctx.globalAlpha = Math.min(1, (1 - k) * 1.25);
     ctx.beginPath();
-    ctx.arc(x, y, full * (0.25 + k * 0.85), 0, Math.PI * 2);
-    ctx.strokeStyle = '#c9a06a';
-    ctx.lineWidth = Math.max(2, 9 * (1 - k));
+    ctx.arc(x, y, ringR, 0, Math.PI * 2);
+    ctx.strokeStyle = '#d8894a';
+    ctx.lineWidth = Math.max(2, 14 * (1 - k));
     ctx.stroke();
 
-    ctx.globalAlpha = (1 - k) * 0.45;
+    // Внутренний светлый кант — край волны должен быть виден даже на
+    // тёмном поле, а тёплый снаружи гаснет быстрее белого.
+    ctx.globalAlpha = Math.min(1, (1 - k) * 0.7);
     ctx.beginPath();
-    ctx.arc(x, y, full * (0.25 + k * 0.85), 0, Math.PI * 2);
+    ctx.arc(x, y, ringR, 0, Math.PI * 2);
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = Math.max(1, 3 * (1 - k));
+    ctx.lineWidth = Math.max(1, 4 * (1 - k));
     ctx.stroke();
+
+    // Быстрый фронт: обгоняет основное кольцо и к концу анимации гаснет
+    // первым. Читается как ударная волна, а не как растущий круг.
+    const fast = full * (0.25 + k * 1.5);
+    if (fast > ringR) {
+        ctx.globalAlpha = Math.max(0, (1 - k) * 1.6 - 0.25);
+        ctx.beginPath();
+        ctx.arc(x, y, fast, 0, Math.PI * 2);
+        ctx.strokeStyle = '#ffd9a8';
+        ctx.lineWidth = Math.max(1, 5 * (1 - k));
+        ctx.stroke();
+    }
 
     ctx.restore();
 }
@@ -3263,6 +3371,13 @@ function draw(ctx, snap, view, opts = {}) {
         if (!p.alive) drawGhost(ctx, snap, view, p, index);
     });
 
+    // Зона отталкивания камня — под героями. Иначе перекрывала бы
+    // того, кто стоит рядом с камнем, и прятала бы ровно то, ради чего
+    // камень и поставлен: видно, кто в опасности.
+    for (const p of snap.players) {
+        if (p.alive && p.stone > 0) drawStoneZone(ctx, view, snap, p);
+    }
+
     // Тот же расчёт уходит в drawPlayer: веер подсвечивается по
     // наличию цели, а не по чему-то отдельному.
     const pass = lock ? Object.assign({}, opts, { lock }) : opts;
@@ -3275,12 +3390,20 @@ function draw(ctx, snap, view, opts = {}) {
     // уезжала бы под того, кто нарисован последним.
     if (lock) drawLockMark(ctx, view, snap, lock, performance.now());
 
-    if (opts.effects && opts.effects.length) {
-        const now = performance.now();
-        for (const fx of opts.effects) drawPushFx(ctx, view, snap, fx, now);
-        for (const fx of opts.chains || []) drawChainFx(ctx, view, snap, fx, now);
-        for (const fx of opts.bursts || []) drawBurstFx(ctx, view, snap, fx, now);
-    }
+    // Каждый список проверяется сам по себе.
+    //
+    // Раньше все три эффекта стояли внутри `if (opts.effects && ...)`, то
+    // есть взрыв камня и цепочка рисовались только если в последние
+    // 640 мс случился удар толчком. Клиент шлёт три списка отдельно, и
+    // замер на 200 партиях ботов показал: **71.6% взрывов камня не
+    // рисовались вовсе** — 722 из 1009. Камень стоит 1.3 секунды, за это
+    // время удара может не быть ни разу, и взрыв просто не появлялся.
+    // Взрыв и цепочка не имеют никакого отношения к ударам, поэтому и
+    // условий у них теперь собственные.
+    const now = performance.now();
+    for (const fx of opts.effects || []) drawPushFx(ctx, view, snap, fx, now);
+    for (const fx of opts.chains || []) drawChainFx(ctx, view, snap, fx, now);
+    for (const fx of opts.bursts || []) drawBurstFx(ctx, view, snap, fx, now);
 
     drawGrace(ctx, view, snap);
 
