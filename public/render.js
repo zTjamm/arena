@@ -149,6 +149,32 @@ function drawGhost(ctx, snap, view, p, index) {
     ctx.restore();
 }
 
+/**
+ * Мигание золотой обводки своего героя.
+ *
+ * Мигание **плавное, а не вклю-выклю**. Жёсткое мигание здесь вредно по
+ * простой причине: обводка нужна, чтобы не терять себя в свалке из
+ * восьми человек, а на «тёмной» фазе герой пропадает ровно тогда, когда
+ * смотришь в свалку. Поэтому контур не исчезает никогда — он дышит
+ * между 40% и 100% прозрачности.
+ *
+ * Период 1.7 с: медленное мигание читается как «живой», быстрое —
+ * как тревожная лампа и отвлекает от поля.
+ *
+ * Считается по `now`, который кадр берёт один раз, — иначе у каждого
+ * из восьми героев фаза считалась бы отдельно и контуры разошлись бы
+ * во времени.
+ */
+const GOLD_PULSE_MS = 1700;
+
+function goldPulse(now) {
+    const phase = (now % GOLD_PULSE_MS) / GOLD_PULSE_MS;
+    // Косинус от 0 до 1 и обратно: в начале и в конце фазы одинаково.
+    const k = 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
+    const alpha = 0.40 + k * 0.60;
+    return 'rgba(255,210,90,' + alpha.toFixed(3) + ')';
+}
+
 function facing(p) {
     let fx = p.dirx;
     let fy = p.diry;
@@ -500,7 +526,7 @@ function starPath(ctx, cx, cy, r, inner) {
  *   * **замахивается** — сжимающееся кольцо и веер, подсвеченный
  *     по тому, есть кто под ударом.
  */
-function drawPlayer(ctx, snap, view, p, index, opts) {
+function drawPlayer(ctx, snap, view, p, index, opts, now) {
     const color = colorOf(index);
     const sx = view.cx + p.x * view.scale;
     const sy = view.cy + p.y * view.scale;
@@ -588,12 +614,13 @@ function drawPlayer(ctx, snap, view, p, index, opts) {
         ctx.stroke();
         ctx.restore();
     } else {
-        // Свой герой обводится **по форме**, золотом. Раньше здесь стоял
-        // ровный белый круг радиусом r + 3, и он не имел отношения к
-        // персонажу: срезал шлем рыцаря, проходил сквозь волнистый подол
-        // призрака и на телефоне читался как чужеродное кольцо.
+        // Свой герой обводится **по форме**, золотом, и золото мигает. Раньше
+        // здесь стоял ровный белый круг радиусом r + 3, и он не имел
+        // отношения к персонажу: срезал шлем рыцаря, проходил сквозь
+        // волнистый подол призрака и на телефоне читался как чужеродное
+        // кольцо.
         const mine = opts.me != null && p.id === opts.me;
-        drawHero(ctx, index, r, spin, mine ? '#ffd25a' : null);
+        drawHero(ctx, index, r, spin, mine ? goldPulse(now) : null);
 
         // Прыгающий подсвечивается контуром: неуязвимость — это
         // обещание, и оно должно быть видно, а не выводиться из
@@ -1100,8 +1127,13 @@ function draw(ctx, snap, view, opts = {}) {
     // наличию цели, а не по чему-то отдельному.
     const pass = lock ? Object.assign({}, opts, { lock }) : opts;
 
+    // Время кадра берётся один раз и передаётся игрокам: мигание
+    // золотой обводки считает по нему, и если бы каждый из восьми героев
+    // брал своё `performance.now()`, фазы разошлись бы во времени.
+    const now = performance.now();
+
     snap.players.forEach((p, index) => {
-        if (p.alive) drawPlayer(ctx, snap, view, p, index, pass);
+        if (p.alive) drawPlayer(ctx, snap, view, p, index, pass, now);
     });
 
     // Метка поверх всех героев: в свалке из восьми человек она иначе
@@ -1117,8 +1149,7 @@ function draw(ctx, snap, view, opts = {}) {
     // рисовались вовсе** — 722 из 1009. Камень стоит 1.3 секунды, за это
     // время удара может не быть ни разу, и взрыв просто не появлялся.
     // Взрыв и цепочка не имеют никакого отношения к ударам, поэтому и
-    // условий у них теперь собственные.
-    const now = performance.now();
+    // условий у них теперь собственные. `now` тот же, что и у игроков.
     for (const fx of opts.effects || []) drawPushFx(ctx, view, snap, fx, now);
     for (const fx of opts.chains || []) drawChainFx(ctx, view, snap, fx, now);
     for (const fx of opts.bursts || []) drawBurstFx(ctx, view, snap, fx, now);
