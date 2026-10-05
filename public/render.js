@@ -183,8 +183,21 @@ function facing(p) {
  * На откате дуги гаснут — заодно видно, что бить пока нельзя.
  */
 function drawAim(ctx, view, sx, sy, p, ready, lock) {
-    const { fx, fy } = facing(p);
+    const f = facing(p);
+
+    // Под замахом с целью веер рисуется **по направлению на цель**, а
+    // не по носу: автонаведение бьёт именно туда, и картинка обязана
+    // показывать то же самое. Без цели — по носу, как и раньше.
+    //
+    // Ось полёта и дальний край дуги берутся оттуда же, поэтому весь
+    // рисунок разом поворачивается на цель. Это видно и полезно: в
+    // момент нажатия веер доворачивается на соперника, и игрок видит,
+    // что автонаведение включилось.
+    const aimed = lock && lock.ax != null;
+    const fx = aimed ? lock.ax : f.fx;
+    const fy = aimed ? lock.ay : f.fy;
     const angle = Math.atan2(fy, fx);
+
     const half = Math.acos(T.PUSH_COS);        // половина конуса удара
     const s = view.scale;
     const reach = T.PUSH_RANGE * s;
@@ -319,7 +332,23 @@ function hitScan(snap, p) {
     }
 
     if (!target) return null;
-    return { id: target.id, stone: target.stone > 0 };
+
+    // Направление на цель: по нему автонаведение реально бьёт, и по
+    // нему же рисуется веер под замахом. Если бы рисовали по носу,
+    // картинка обещала бы одно, а удар летел бы чуть вбок — то есть
+    // на телефоне, где палец и так не даёт навестись точно, прицел
+    // врал бы именно там, где он нужнее всего.
+    const dx = target.x - p.x;
+    const dy = target.y - p.y;
+    const d = Math.hypot(dx, dy);
+    const aimed = d > 1e-9;
+
+    return {
+        id: target.id,
+        stone: target.stone > 0,
+        ax: aimed ? dx / d : null,
+        ay: aimed ? dy / d : null,
+    };
 }
 
 /**

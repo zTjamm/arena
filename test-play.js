@@ -23,6 +23,18 @@
 
 const { T, createArena, addPlayer, step } = require('./game/arena');
 
+/**
+ * Сколько тиков в `seconds`.
+ *
+ * Проверки гоняют симуляцию тиками, а тик поменялся с 1/30 на 1/60.
+ * Вписаное число тиков после этого означает вдвое меньше времени: цикл
+ * в 40 тиков был 1.33 с, а стал 0.67 с — меньше замаха, и удар просто
+ * не успевал выйти. Ожидания по времени считаются здесь.
+ */
+function windupTicks(seconds) {
+    return Math.ceil(seconds / T.TICK);
+}
+
 let passed = 0;
 let failed = 0;
 const failures = [];
@@ -131,10 +143,13 @@ for (const [label, opts] of CASES) {
     check(`${label}: толчок вообще срабатывал`, swings > 0,
         `замахов ${swings}`);
 
-    // Партия обязана кончиться быстро. Порог в 500 тиков (16 с) —
-    // это несколько ударов с разворотами: ровно столько занимает
-    // выталкивание человека с самого края поля.
-    check(`${label}: быстро`, ticks <= 500, `${ticks} тиков`);
+    // Партия обязана кончиться быстро. Порог задан **в секундах**, а
+    // не в тиках: при 30 Гц 500 тиков было 16 с, и после перехода на
+    // 60 Гц те же 500 тиков стали 8 с — проверка стала вдвое строже
+    // сама по себе и начала падать на нормальных партиях.
+    const fastSeconds = 16;
+    check(`${label}: быстро`, ticks <= windupTicks(fastSeconds),
+        `${(ticks * T.TICK).toFixed(1)} с, надо меньше ${fastSeconds}`);
 }
 
 
@@ -195,7 +210,9 @@ for (const [label, opts] of CASES) {
             b: away,
         });
     }
-    for (let i = 0; i < 40; i++) step(pushed, { b: away });
+    for (let i = 0; i < windupTicks(T.PUSH_DIST / T.PUSH_FLIGHT_SPEED + 0.5); i++) {
+        step(pushed, { b: away });
+    }
 
     // Оба сценария упирают соперника в границу и там его держат, поэтому
     // сравнивать пройденное расстояние бессмысленно — упереться можно
@@ -218,7 +235,9 @@ for (const [label, opts] of CASES) {
     addPlayer(edge, 'b', { x: 70, y: 0 });
     pastGrace(edge);
     step(edge, { a: { x: 1, push: true } });
-    for (let i = 0; i < 40; i++) step(edge, { a: { x: 1, push: true } });
+    for (let i = 0; i < windupTicks(T.PUSH_WINDUP + T.PUSH_DIST / T.PUSH_FLIGHT_SPEED + 0.5); i++) {
+        step(edge, { a: { x: 1, push: true } });
+    }
 
     check('одного удара у самого края хватает',
         edge.players[1].alive === false,

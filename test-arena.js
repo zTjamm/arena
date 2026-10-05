@@ -25,6 +25,18 @@ const {
     T, createArena, addPlayer, spawnPoint, step, marginOf
 } = require('./game/arena');
 
+/**
+ * Сколько тиков в `seconds`.
+ *
+ * Тесты крутят симуляцию тиками, а тик поменялся с 1/30 на 1/60. Любое
+ * число тиков в проверке после этого означает вдвое меньше времени, и
+ * проверка падает на ровном месте, хотя логика не менялась. Поэтому все
+ * ожидания по времени считаются здесь, а не вписаны числами.
+ */
+function windupTicks(seconds) {
+    return Math.ceil((seconds === undefined ? 1 : seconds) / T.TICK);
+}
+
 let passed = 0;
 let failed = 0;
 const failures = [];
@@ -420,7 +432,7 @@ function flyOut(arena, id) {
 
     // Отпустили через 10 тиков и больше кнопку не трогаем.
     let landed = null;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < windupTicks(T.PUSH_WINDUP + 0.5); i++) {
         const inputs = i === 10 ? { a: { push: false } } : {};
         for (const e of step(arena, inputs)) {
             if (e.type === 'push') landed = e;
@@ -898,16 +910,18 @@ function flyOut(arena, id) {
     step(arena, { a: { x: 1, stone: true } });
     const x0 = arena.players[0].x;
 
-    // Прогон заведомо короче камня (1.3 с — это 39 тиков, берём 30):
-    // всё это время игрок обязан стоять ровно там, где окаменел.
-    for (let i = 0; i < 30; i++) step(arena, { a: { x: 1 } });
+    // Прогон заведомо короче камня: всё это время игрок обязан стоять
+    // ровно там, где окаменел.
+    const shorter = windupTicks(T.STONE_TIME * 0.6);
+    for (let i = 0; i < shorter; i++) step(arena, { a: { x: 1 } });
     check('окаменение на ходу останавливает сразу',
         Math.abs(arena.players[0].x - x0) < 1e-6,
         'скорость перед камнем ' + speed.toFixed(0) + ', сдвинулся на '
         + (arena.players[0].x - x0).toFixed(3));
 
     // И по истечении камня игрок снова свободен.
-    for (let i = 0; i < 30; i++) step(arena, { a: { x: 1 } });
+    const longer = windupTicks(T.STONE_TIME * 0.8);
+    for (let i = 0; i < longer; i++) step(arena, { a: { x: 1 } });
     check('после камня снова можно двигаться',
         arena.players[0].x > x0 + 5,
         'сдвиг ' + (arena.players[0].x - x0).toFixed(0));
@@ -919,7 +933,7 @@ function flyOut(arena, id) {
     addPlayer(arena, 'a', { x: 0, y: 0 });
 
     step(arena, { a: { x: 1, stone: true } });
-    for (let i = 0; i < 70; i++) step(arena, { a: { x: 1 } });
+    for (let i = 0; i < windupTicks(T.STONE_TIME + 0.5); i++) step(arena, { a: { x: 1 } });
 
     check('после камня снова можно ходить',
         arena.players[0].stone === 0 && arena.players[0].vx > 0,
@@ -933,9 +947,9 @@ function flyOut(arena, id) {
     addPlayer(arena, 'a', { x: 0, y: 0 });
 
     step(arena, { a: { stone: true } });
-    for (let i = 0; i < 61; i++) step(arena, {});
+    for (let i = 0; i < windupTicks(T.STONE_TIME + 0.2); i++) step(arena, {});
 
-    check('камень держится две секунды', arena.players[0].stone === 0,
+    check('камень держится STONE_TIME', arena.players[0].stone === 0,
         'осталось ' + arena.players[0].stone.toFixed(3));
 }
 
