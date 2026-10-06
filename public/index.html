@@ -583,6 +583,60 @@
         border-color: rgba(255, 226, 122, 0.6);
     }
 
+    /* Живая таблица: узкая полоса слева под полосой скиллов. Узкая
+       специально — на телефоне поле занимает почти весь экран, и широкая
+       таблица закрыла бы ровно тот угол, где чаще всего видно соперника.
+       Шрифт мелкий, но имена не сокращаются: «кто это» важнее, чем
+       сколько у него ступеней. */
+    #boardLive {
+        position: fixed;
+        top: calc(64px + env(safe-area-inset-top));
+        left: 10px;
+        width: 132px;
+        padding: 5px 6px;
+        border-radius: 8px;
+        border: 1px solid rgba(232, 240, 255, 0.12);
+        background: rgba(12, 17, 28, 0.72);
+        font-size: 10px;
+        line-height: 1.3;
+        pointer-events: none;
+        z-index: 5;
+    }
+
+    #boardLive .bdRow {
+        display: flex;
+        gap: 4px;
+        align-items: baseline;
+        padding: 1px 0;
+    }
+
+    #boardLive .bdRow.me { color: #ffe27a; font-weight: 600; }
+    #boardLive .bdRow.dead { opacity: 0.45; }
+
+    #boardLive .bdNm {
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    #boardLive .bdFr {
+        flex: 0 0 auto;
+        color: #ffe27a;
+    }
+
+    #boardLive .bdKl {
+        flex: 0 0 auto;
+        min-width: 12px;
+        text-align: right;
+        color: var(--dim);
+    }
+
+    /* Место на живой полосе не помещается: у живых оно всё равно прочерк,
+       а 132 пикселя на восемь строк — это уже мелко. Место остаётся в
+       панели итогов, где для него есть место. */
+    #boardLive .bdPl { display: none; }
+
     /* Таблица итогов. Показывается и в конце партии, и живьём: список
        фрагов и выбывших нужен прямо во время боя, а не только по
        итогам. */
@@ -593,7 +647,7 @@
         border-top: 1px solid rgba(232, 240, 255, 0.12);
     }
 
-    #board .row {
+    #board .bdRow {
         display: flex;
         align-items: center;
         gap: 8px;
@@ -601,31 +655,31 @@
         border-bottom: 1px solid rgba(232, 240, 255, 0.07);
     }
 
-    #board .row.me { color: #ffe27a; font-weight: 600; }
-    #board .row.dead { opacity: 0.55; }
+    #board .bdRow.me { color: #ffe27a; font-weight: 600; }
+    #board .bdRow.dead { opacity: 0.55; }
 
-    #board .nm {
+    #board .bdNm {
         flex: 1 1 auto;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
 
-    #board .fr {
+    #board .bdFr {
         flex: 0 0 auto;
         min-width: 46px;
         text-align: right;
         color: #ffe27a;
     }
 
-    #board .kl {
+    #board .bdKl {
         flex: 0 0 auto;
         min-width: 46px;
         text-align: right;
         color: var(--dim);
     }
 
-    #board .pl {
+    #board .bdPl {
         flex: 0 0 auto;
         min-width: 34px;
         text-align: right;
@@ -1008,6 +1062,11 @@
          кнопки и не может отличить «закрыто» от «открыто, но на откате»:
          и то и другое выглядит одинаково тусклым. -->
     <div id="kit"></div>
+
+    <!-- Живая таблица игроков. Живёт **вне** панели итогов, потому что
+         панель во время партии скрыта, а список нужен именно в бою: по
+         нему видно, кого уже осталось двое и нет ли среди них тебя. -->
+    <div id="boardLive" class="hidden"></div>
 
     <!-- Кнопка полноэкранного режима. Показывается только там, где он
          вообще возможен, и только когда ещё не включён. На iPhone

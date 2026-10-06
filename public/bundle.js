@@ -3173,14 +3173,31 @@ function drawLockMark(ctx, view, snap, lock, now) {
  * мигание и читается как «можно нажать».
  */
 function drawStars(ctx, sx, sy, radius, cooldowns, opts) {
-    const defs = [
-        { frac: cooldowns.push / T.PUSH_COOLDOWN, color: '#7fd0ff' },
-        { frac: cooldowns.jump / T.JUMP_COOLDOWN, color: '#ffd23d' },
+    // Звезда рисуется **только если скилл у игрока есть**.
+    //
+    // Раньше над каждым героем висели все три звезды, и это было прямое
+    // враньё: у игрока со ступенью ноль есть только толчок, а над ним
+    // стояли ещё и прыжок с камнем. Со стороны нельзя было понять, кого
+    // вообще опасно трогать, и собственные закрытые скиллы выглядели
+    // как готовые к нажатию — по откату, которого у них нет.
+    //
+    // Толчок не гейтится: он открыт всегда, со ступени ноль.
+    const grade = opts.grade || 0;
+    const all = [
+        { need: 0, frac: cooldowns.push / T.PUSH_COOLDOWN, color: '#7fd0ff' },
         {
+            need: T.GRADE_JUMP,
+            frac: cooldowns.jump / T.JUMP_COOLDOWN,
+            color: '#ffd23d',
+        },
+        {
+            need: T.GRADE_STONE,
             frac: cooldowns.stone / (T.STONE_TIME + T.STONE_COOLDOWN),
             color: '#b07a4a',
         },
     ];
+    const defs = all.filter(d => grade >= d.need);
+    if (defs.length === 0) return;
 
     const size = Math.max(3.2, radius * 0.42);
     const gap = size * 2.5;
@@ -3190,9 +3207,13 @@ function drawStars(ctx, sx, sy, radius, cooldowns, opts) {
     ctx.save();
     ctx.lineWidth = Math.max(1, size * 0.28);
 
+    // Смещение считается от **собранного** количества, а не от тройки:
+    // иначе одна звезда уезжала бы влево от головы на целый шаг.
+    const mid = (defs.length - 1) / 2;
+
     for (let i = 0; i < defs.length; i++) {
         const d = defs[i];
-        const cx = sx + (i - 1) * gap;
+        const cx = sx + (i - mid) * gap;
         const ready = !(d.frac > 0);
 
         // Мигание готового скилла. Частота одинаковая у всех трёх,
@@ -3346,9 +3367,6 @@ function drawPlayer(ctx, snap, view, p, index, opts, now) {
         const mine = opts.me != null && p.id === opts.me;
     drawHero(ctx, index, r, spin, mine ? goldPulse(now) : null);
 
-    // Звёздочки ступеней — только свои.
-    drawGrades(ctx, sx, sy, p, r, opts);
-
         // Прыгающий подсвечивается контуром: неуязвимость — это
         // обещание, и оно должно быть видно, а не выводиться из
         // вилки в углу. Отдельный «щит» вокруг игрока.
@@ -3404,7 +3422,7 @@ function drawPlayer(ctx, snap, view, p, index, opts, now) {
 
     // Перезарядки — звездами над головой, и они всегда на месте,
     // в том числе у летящего и у камня: их скиллы тоже на откате.
-    drawStars(ctx, sx, sy, r, p.cooldowns, { spin });
+    drawStars(ctx, sx, sy, r, p.cooldowns, { spin, grade: p.grade || 0 });
 
     // Замах толчка — рисуется после звёзд, чтобы он был поверх героя,
     // а не спорил с ними за место над головой.
@@ -3875,38 +3893,6 @@ function drawStar(ctx, view, snap, now) {
         ctx.setLineDash([]);
     }
 
-    ctx.restore();
-}
-
-/**
- * Звёздочки ступеней над героем.
- *
- * Раньше они были только над своим героем, и это была ошибка: по полю
- * нельзя было понять, у кого уже есть второй и третий скилл, а это
- * ровно то, что решает, кого сейчас опасно трогать. Теперь звёздочки
- * рисуются у всех, **но только если ступень хоть одна есть** — над
- * игроком без единого скилла пустая строка звёзд ничего не сообщала бы,
- * только засоряла кадр.
- *
- * Свои рисуются крупнее и ближе: их надо различать на бегу.
- */
-function drawGrades(ctx, sx, sy, p, radius, opts) {
-    const grade = p.grade || 0;
-    if (grade <= 0) return;
-
-    const mine = opts.me != null && p.id === opts.me;
-    const s = Math.max(2.2, radius * (mine ? 0.2 : 0.16));
-    const gap = s * 2.7;
-    const baseY = sy - radius - s * (mine ? 5.4 : 4.4);
-
-    ctx.save();
-    // У чужих звёздочки чуть тусклее: свои должны читаться первыми.
-    ctx.globalAlpha = mine ? 1 : 0.78;
-    for (let i = 0; i < grade; i++) {
-        starPath(ctx, sx + (i - (grade - 1) / 2) * gap, baseY, s, s * 0.45);
-        ctx.fillStyle = '#ffe27a';
-        ctx.fill();
-    }
     ctx.restore();
 }
 

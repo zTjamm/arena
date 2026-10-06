@@ -421,19 +421,23 @@
             if (a.alive !== b.alive) return a.alive ? -1 : 1;
             const g = (b.grade || 0) - (a.grade || 0);
             if (g) return g;
-            return (b.eliminatedByCount || 0) - (a.eliminatedByCount || 0);
+            return (b.kills || 0) - (a.kills || 0);
         });
 
         let html = '';
         for (const p of rows) {
-            const kills = p.eliminatedByCount || 0;
+            // Поле называется `kills` — снимок шлёт именно его. Раньше здесь было
+            // `eliminatedByCount`, поля с таким именем в снимке нет вообще,
+            // и столбец вылетов молча показывал ноль у всех, включая
+            // того, кто кого-то выбил.
+            const kills = p.kills || 0;
             const place = p.alive ? '—' : (p.place || '—');
             const cls = (p.id === you ? 'me' : '') + (p.alive ? '' : ' dead');
-            html += `<div class="row ${cls}">`
-                + `<span class="nm">${p.alive ? '' : '✝ '}${esc(p.id)}</span>`
-                + `<span class="fr">★${p.grade || 0}</span>`
-                + `<span class="kl">${kills}</span>`
-                + `<span class="pl">${place}</span>`
+            html += `<div class="bdRow ${cls}">`
+                + `<span class="bdNm">${p.alive ? '' : '✝ '}${esc(p.id)}</span>`
+                + `<span class="bdFr">★${p.grade || 0}</span>`
+                + `<span class="bdKl">${kills}</span>`
+                + `<span class="bdPl">${place}</span>`
                 + '</div>';
         }
         return html;
@@ -827,6 +831,7 @@ setInterval(() => {
     const feedEl = document.getElementById('feed');
     const kitEl = document.getElementById('kit');
     const boardEl = document.getElementById('board');
+    const boardLiveEl = document.getElementById('boardLive');
     const hudMe = document.getElementById('hudMe');
     const hudStatus = document.getElementById('hudStatus');
 
@@ -918,10 +923,21 @@ setInterval(() => {
         const html = feedHtml();
         set('feed', feedEl, html, true);
 
-        // Таблица видна и живьём: список нужен во время боя, а не
-        // только по итогам. В панели она и так стоит, а на поле её
-        // раньше не было вообще.
+        // Таблица идёт **в две корзины**: на поле и в панель итогов.
+        //
+        // Одна не годится: панель во время партии скрыта, и таблица,
+        // лежавшая только в ней, оказывалась невидимой ровно тогда, когда
+        // она нужнее всего. На поле своя полоса, в панели своя копия,
+        // обе — из одного boardHtml, чтобы числа не разошлись.
         const board = lastSnap && lastSnap.players ? boardHtml() : '';
+
+        if (board && active && !finished) {
+            boardLiveEl.classList.remove('hidden');
+            set('boardLive', boardLiveEl, board, true);
+        } else {
+            boardLiveEl.classList.add('hidden');
+        }
+
         if (board) {
             boardEl.classList.remove('hidden');
             set('board', boardEl, board, true);
