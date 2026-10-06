@@ -5,7 +5,7 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "test": "node test-arena.js && node test-play.js && node test-bot.js && node test-lobby.js && node test-accounts.js && node test-lerp.js",
+    "test": "node tools/run-tests.js",
     "view": "node tools/view.js",
     "start": "node server.js"
   },
