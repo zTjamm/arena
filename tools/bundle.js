@@ -101,6 +101,58 @@ function build() {
     return fs.statSync(OUT).size;
 }
 
+/**
+ * Проставляет в теги скриптов версию содержимого.
+ *
+ * Зачем. Скрипты подключены как `src="client.js"`, без вопроса. Node
+ * отдаёт их с `Cache-Control: public, max-age=0` и ETag, то есть
+ * браузер обязан ревалидировать — и по протоколу так и происходит. Но
+ * на практике браузер всё равно отдаёт из кэша старую копию: проверено
+ * дважды, обычная перезагрузка страницы приводила к тому, что в игре
+ * работал код, которого в новой выкладке нет.
+ *
+ * Для игрока это выглядит очень неприятно: правка выкачена, а человек
+ * её не видит и concludes, что правки не работают. Разбираться приходится
+ * вручную, с очисткой кэша, а это ровно то, чего от него ждать нельзя.
+ *
+ * Вопрос в адресе решает это надёжно: при изменении содержимого
+ * меняется и адрес, и старая копия просто не может прийти. Версия
+ * считается из содержимого самих файлов, поэтому руками её
+ * поднимать не нужно — пересобрал и забыл.
+ *
+ * Индекс правится только если версия изменилась, иначе пересборка
+ * без правок не трогала бы файл впустую и не плодила бы коммиты.
+ */
+const SCRIPTS = ['bundle.js', 'app.js', 'client.js'];
+
+function versionOf() {
+    const crypto = require('crypto');
+    const hash = crypto.createHash('sha1');
+    for (const name of SCRIPTS) {
+        const file = path.join(PUBLIC, name);
+        if (!fs.existsSync(file)) return null;
+        hash.update(fs.readFileSync(file));
+    }
+    return hash.digest('hex').slice(0, 10);
+}
+
+function stampIndex(version) {
+    const file = path.join(PUBLIC, 'index.html');
+    let html = fs.readFileSync(file, 'utf8');
+    const before = html;
+
+    for (const name of SCRIPTS) {
+        const re = new RegExp('(src=")' + name + '(\\?v=[0-9a-f]+)?(")');
+        html = html.replace(re, '$1' + name + '?v=' + version + '$3');
+    }
+
+    if (html !== before) {
+        fs.writeFileSync(file, html);
+        return true;
+    }
+    return false;
+}
+
 function main() {
     const missing = MODULES.filter(f => !fs.existsSync(path.join(ROOT, f)));
     if (missing.length) {
@@ -111,6 +163,17 @@ function main() {
     const size = build();
     console.log('Собран public/bundle.js — ' + MODULES.length
         + ' модулей, ' + Math.round(size / 1024) + ' КБ');
+
+    // Версия считается по содержимому уже собранного бандла и двух
+    // отдельных скриптов, поэтому порядок именно такой: сначала сборка.
+    const version = versionOf();
+    if (!version) {
+        console.error('Не найден один из скриптов для версии: ' + SCRIPTS.join(', '));
+        process.exit(1);
+    }
+    const changed = stampIndex(version);
+    console.log('Версия скриптов ' + version
+        + (changed ? ' — проставлена в index.html' : ' — index.html уже актуален'));
 }
 
 module.exports = { build, MODULES, OUT };
