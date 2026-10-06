@@ -3183,6 +3183,15 @@ function drawStars(ctx, sx, sy, radius, cooldowns, opts) {
     //
     // Толчок не гейтится: он открыт всегда, со ступени ноль.
     const grade = opts.grade || 0;
+
+    // Звезда второго скилла крупнее остальных.
+    //
+    // Камень — вторая ступень, и он был заметно хуже виден всех: замер
+    // контраста к заливке поля дал толчку 10.03:1 и прыжку 11.79:1, а
+    // камню 4.65:1 — вдвое бледнее. Плюс его коричневый гас в мигании
+    // до 2.29:1, то есть в нижней точке пульсации его не было видно
+    // вовсе. Размер тут не лечит контраст, но увеличивает площадь,
+    // а глаз на движущемся поле цепляется за площадь.
     const all = [
         { need: 0, frac: cooldowns.push / T.PUSH_COOLDOWN, color: '#7fd0ff' },
         {
@@ -3193,7 +3202,11 @@ function drawStars(ctx, sx, sy, radius, cooldowns, opts) {
         {
             need: T.GRADE_STONE,
             frac: cooldowns.stone / (T.STONE_TIME + T.STONE_COOLDOWN),
-            color: '#b07a4a',
+            // Тот же коричневый тон, но светлее: 6.89:1 вместо 4.65:1.
+            // Оттенок сохранён, чтобы звезда камня и кнопка камня
+            // читались как одно и то же.
+            color: '#d19a5e',
+            scale: 1.3,
         },
     ];
     const defs = all.filter(d => grade >= d.need);
@@ -3201,27 +3214,44 @@ function drawStars(ctx, sx, sy, radius, cooldowns, opts) {
 
     const size = Math.max(3.2, radius * 0.42);
     const gap = size * 2.5;
-    const baseY = sy - radius - size * 3.1;
+    const radii = defs.map(d => size * (d.scale || 1));
+    const biggest = Math.max.apply(null, radii);
+
+    // Отступ сверху считается от **самой большой** звезды, иначе
+    // крупная каменная поднималась бы на голову при неактивной.
+    const baseY = sy - radius - biggest * 3.1;
     const spin = opts.spin || 0;
 
     ctx.save();
-    ctx.lineWidth = Math.max(1, size * 0.28);
 
-    // Смещение считается от **собранного** количества, а не от тройки:
-    // иначе одна звезда уезжала бы влево от головы на целый шаг.
-    const mid = (defs.length - 1) / 2;
+    // Раскладка идёт от краёв, потому что размеры теперь разные:
+    // при равном шаге крупная звезда налезала бы на соседнюю.
+    let total = 0;
+    for (const r of radii) total += r * 2;
+    total += gap * (defs.length - 1);
+    let cursor = sx - total / 2;
 
     for (let i = 0; i < defs.length; i++) {
         const d = defs[i];
-        const cx = sx + (i - mid) * gap;
+        const r = radii[i];
+        const cx = cursor + r;
+        cursor += r * 2 + gap;
+
         const ready = !(d.frac > 0);
 
         // Мигание готового скилла. Частота одинаковая у всех трёх,
         // иначе цвет сам по себе ничего бы не значил.
-        ctx.globalAlpha = ready ? 0.55 + 0.45 * Math.abs(Math.sin(spin * 3.2)) : 1;
+        //
+        // Нижняя точка поднята с 0.55 до 0.72. Замер: даже жёлтая звезда
+        // на 0.55 падала до 4.41:1, а коричневая — до 2.29:1, и на
+        // тёмном поле в этот момент она просто исчезала. Тот же
+        // довод, по которому у золотой обводки героя пол 0.65: ниже
+        // 0.6 пульсация уже не читается как мигание, а просто гаснет.
+        ctx.globalAlpha = ready ? 0.72 + 0.28 * Math.abs(Math.sin(spin * 3.2)) : 1;
+        ctx.lineWidth = Math.max(1, r * 0.28);
 
         // Контур рисуется всегда: звезда видна и на откате, и готовая.
-        starPath(ctx, cx, baseY, size, size * 0.45);
+        starPath(ctx, cx, baseY, r, r * 0.45);
         ctx.strokeStyle = d.color;
         ctx.stroke();
 
@@ -3230,12 +3260,12 @@ function drawStars(ctx, sx, sy, radius, cooldowns, opts) {
             // и рисуется та же звезда: край обрезается ровно по линии
             // заряда, без попытки повторить форму половиной звезды.
             const fill = 1 - Math.min(1, d.frac);
-            const y1 = baseY + size * (1 - 2 * fill);
+            const y1 = baseY + r * (1 - 2 * fill);
             ctx.save();
             ctx.beginPath();
-            ctx.rect(cx - size * 1.3, y1, size * 2.6, size * 2.6);
+            ctx.rect(cx - r * 1.3, y1, r * 2.6, r * 2.6);
             ctx.clip();
-            starPath(ctx, cx, baseY, size, size * 0.45);
+            starPath(ctx, cx, baseY, r, r * 0.45);
             ctx.fillStyle = d.color;
             ctx.fill();
             ctx.restore();
