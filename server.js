@@ -57,7 +57,24 @@ const EMPTY_INPUT = Object.freeze({
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { path: SOCKET_PATH });
+/**
+ * Сокет игры.
+ *
+ * `transports: ['websocket']` — только WebSocket, без HTTP long-polling.
+ * По умолчанию socket.io начинает с polling и переключается потом; на
+ * неустойчивой мобильной сети переключение задерживается или не
+ * проходит, и десятки сообщений в секунду идут через long-polling, где
+ * каждый кадр ждёт полного HTTP-оборота. При игре в реальном времени это
+ * ровно тот случай, где такая небрежность стоит дороже всего.
+ *
+ * `pingInterval: 10000` вместо стандартных 25 секунд: обрыв связи на
+ * телефоне заметен сразу, а не через двадцать пять секунд молчания.
+ */
+const io = new Server(server, {
+    path: SOCKET_PATH,
+    transports: ['websocket'],
+    pingInterval: 10000,
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 
