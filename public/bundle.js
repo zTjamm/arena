@@ -1676,6 +1676,15 @@ function snapshot(arena) {
             alive: p.alive,
             bot: p.bot,
             eliminatedBy: p.eliminatedBy,
+
+            // Сколько игроков выбил этот. Считается на лету из eliminatedBy
+            // всех остальных, потому что держать отдельный счётчик
+            // значило бы забыть его обнулить.
+            //
+            // Считать надо **по тем, кого выбили**, а не по собственному
+            // eliminatedBy игрока: у победителя он пуст, и счётчик
+            // выдавал бы ноль именно тому, кто выбил всех.
+            kills: arena.players.filter(q => q.eliminatedBy === p.id).length,
             cooldowns: {
                 push: Math.round(p.cooldowns.push * 100) / 100,
                 jump: Math.round(p.cooldowns.jump * 100) / 100,
@@ -3870,22 +3879,29 @@ function drawStar(ctx, view, snap, now) {
 }
 
 /**
- * Звёздочки ступеней над своим героем.
+ * Звёздочки ступеней над героем.
  *
- * Только у себя: чужие ступени были бы шумом на поле, а своей
- * прогрессии видеть надо. Ровно столько, сколько набрано, — потолок
- * виден тем, что шесть звёздочек занимают больше места, чем пять.
+ * Раньше они были только над своим героем, и это была ошибка: по полю
+ * нельзя было понять, у кого уже есть второй и третий скилл, а это
+ * ровно то, что решает, кого сейчас опасно трогать. Теперь звёздочки
+ * рисуются у всех, **но только если ступень хоть одна есть** — над
+ * игроком без единого скилла пустая строка звёзд ничего не сообщала бы,
+ * только засоряла кадр.
+ *
+ * Свои рисуются крупнее и ближе: их надо различать на бегу.
  */
 function drawGrades(ctx, sx, sy, p, radius, opts) {
-    if (opts.me == null || p.id !== opts.me) return;
     const grade = p.grade || 0;
     if (grade <= 0) return;
 
-    const s = Math.max(2.2, radius * 0.2);
+    const mine = opts.me != null && p.id === opts.me;
+    const s = Math.max(2.2, radius * (mine ? 0.2 : 0.16));
     const gap = s * 2.7;
-    const baseY = sy - radius - s * 5.4;
+    const baseY = sy - radius - s * (mine ? 5.4 : 4.4);
 
     ctx.save();
+    // У чужих звёздочки чуть тусклее: свои должны читаться первыми.
+    ctx.globalAlpha = mine ? 1 : 0.78;
     for (let i = 0; i < grade; i++) {
         starPath(ctx, sx + (i - (grade - 1) / 2) * gap, baseY, s, s * 0.45);
         ctx.fillStyle = '#ffe27a';

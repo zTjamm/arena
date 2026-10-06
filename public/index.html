@@ -544,6 +544,94 @@
     #hudMe { color: var(--ink); font-weight: 600; }
     #hudStatus { color: var(--dim); text-align: right; }
 
+    /* Полоса своих скиллов под верхней панелью. Три слова и три значка
+       состояния: открыто, закрыто, усилено ступенью. Именно эта полоса
+       отвечает на вопрос «какие скиллы у меня есть» — приглушённая
+       кнопка сама по себе не говорит, закрыт скилл или просто на
+       откате. */
+    #kit {
+        position: fixed;
+        top: calc(38px + env(safe-area-inset-top));
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: center;
+        gap: 6px;
+        padding: 2px 14px;
+        font-size: 11px;
+        line-height: 1;
+        pointer-events: none;
+        z-index: 5;
+    }
+
+    #kit span {
+        padding: 4px 7px;
+        border-radius: 6px;
+        border: 1px solid rgba(232, 240, 255, 0.16);
+        background: rgba(12, 17, 28, 0.72);
+        color: var(--dim);
+        white-space: nowrap;
+    }
+
+    #kit span.on {
+        color: var(--ink);
+        border-color: rgba(127, 208, 255, 0.55);
+    }
+
+    #kit span.up {
+        color: #ffe27a;
+        border-color: rgba(255, 226, 122, 0.6);
+    }
+
+    /* Таблица итогов. Показывается и в конце партии, и живьём: список
+       фрагов и выбывших нужен прямо во время боя, а не только по
+       итогам. */
+    #board {
+        margin: 10px 0;
+        font-size: 12px;
+        line-height: 1.35;
+        border-top: 1px solid rgba(232, 240, 255, 0.12);
+    }
+
+    #board .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 2px;
+        border-bottom: 1px solid rgba(232, 240, 255, 0.07);
+    }
+
+    #board .row.me { color: #ffe27a; font-weight: 600; }
+    #board .row.dead { opacity: 0.55; }
+
+    #board .nm {
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    #board .fr {
+        flex: 0 0 auto;
+        min-width: 46px;
+        text-align: right;
+        color: #ffe27a;
+    }
+
+    #board .kl {
+        flex: 0 0 auto;
+        min-width: 46px;
+        text-align: right;
+        color: var(--dim);
+    }
+
+    #board .pl {
+        flex: 0 0 auto;
+        min-width: 34px;
+        text-align: right;
+        color: var(--dim);
+    }
+
     #panel {
         position: fixed;
         left: 50%;
@@ -916,6 +1004,11 @@
         <span id="hudStatus"></span>
     </div>
 
+    <!-- Свои скиллы. Без этой полосы игрок видит только приглушённые
+         кнопки и не может отличить «закрыто» от «открыто, но на откате»:
+         и то и другое выглядит одинаково тусклым. -->
+    <div id="kit"></div>
+
     <!-- Кнопка полноэкранного режима. Показывается только там, где он
          вообще возможен, и только когда ещё не включён. На iPhone
          Safari не показывается: там полный экран для страниц запрещён,
@@ -926,6 +1019,7 @@
         <h1 id="panelTitle">Подключение…</h1>
         <div id="panelSub"></div>
         <div id="score" class="hidden"></div>
+        <div id="board" class="hidden"></div>
         <ul id="feed"></ul>
         <div class="row">
             <button id="againBtn">Играть ещё</button>

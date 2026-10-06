@@ -1640,6 +1640,15 @@ function snapshot(arena) {
             alive: p.alive,
             bot: p.bot,
             eliminatedBy: p.eliminatedBy,
+
+            // Сколько игроков выбил этот. Считается на лету из eliminatedBy
+            // всех остальных, потому что держать отдельный счётчик
+            // значило бы забыть его обнулить.
+            //
+            // Считать надо **по тем, кого выбили**, а не по собственному
+            // eliminatedBy игрока: у победителя он пуст, и счётчик
+            // выдавал бы ноль именно тому, кто выбил всех.
+            kills: arena.players.filter(q => q.eliminatedBy === p.id).length,
             cooldowns: {
                 push: Math.round(p.cooldowns.push * 100) / 100,
                 jump: Math.round(p.cooldowns.jump * 100) / 100,

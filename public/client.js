@@ -376,12 +376,11 @@
     bindSkill('btnStone', (v) => { btnStone = v; });
 
     /**
-     * Закрытые скиллы гасятся, но **не прячутся**.
+     * Свои скиллы: что открыто, что усилено, что закрыто.
      *
-     * Кнопка, которой нет, ничего не сообщает: игрок не знает, что скилл
-     * вообще бывает и что его можно открыть. Приглушённая кнопка с
-     * звездой говорит сразу: «есть, но ещё не заслужено». Ядро нажатие
-     * всё равно проигнорирует — здесь только честная картинка.
+     * Без этой полосы вопрос «какие скиллы у меня» не на что ответить:
+     * приглушённая кнопка одинаково выглядит и для закрытого скилла, и
+     * для открытого, который сейчас на откате.
      */
     function applySkillLocks() {
         const me = findMe(lastSnap);
@@ -391,6 +390,53 @@
         const stone = document.getElementById('btnStone');
         if (jump) jump.classList.toggle('locked', grade < T.GRADE_JUMP);
         if (stone) stone.classList.toggle('locked', grade < T.GRADE_STONE);
+
+        const rows = [
+            { name: 'ТОЛЧОК', on: true, up: grade >= T.GRADE_PUSH_POWER },
+            { name: 'ПРЫЖОК', on: grade >= T.GRADE_JUMP, up: grade >= T.GRADE_JUMP_COOLDOWN },
+            { name: 'КАМЕНЬ', on: grade >= T.GRADE_STONE, up: grade >= T.GRADE_STONE_POWER },
+        ];
+
+        let html = '';
+        for (const r of rows) {
+            const cls = r.up ? 'up' : (r.on ? 'on' : '');
+            const mark = r.up ? '★' : (r.on ? '✓' : '·');
+            html += `<span class="${cls}">${mark} ${r.name}</span>`;
+        }
+        set('kit', kitEl, html, true);
+    }
+
+    /**
+     * Таблица игроков: ступени, вылеты, место.
+     *
+     * Показывается **живьём**, а не только по итогам: кому сколько фрагов
+     * и кто уже выбыл видно прямо во время боя, и это влияет на решения
+     * — на поле осталось трое, и третий сейчас мой.
+     *
+     * Сортировка: живые выше выбывших, внутри — по ступеням и вылетам.
+     */
+    function boardHtml() {
+        if (!lastSnap || !lastSnap.players) return '';
+        const rows = lastSnap.players.slice().sort((a, b) => {
+            if (a.alive !== b.alive) return a.alive ? -1 : 1;
+            const g = (b.grade || 0) - (a.grade || 0);
+            if (g) return g;
+            return (b.eliminatedByCount || 0) - (a.eliminatedByCount || 0);
+        });
+
+        let html = '';
+        for (const p of rows) {
+            const kills = p.eliminatedByCount || 0;
+            const place = p.alive ? '—' : (p.place || '—');
+            const cls = (p.id === you ? 'me' : '') + (p.alive ? '' : ' dead');
+            html += `<div class="row ${cls}">`
+                + `<span class="nm">${p.alive ? '' : '✝ '}${esc(p.id)}</span>`
+                + `<span class="fr">★${p.grade || 0}</span>`
+                + `<span class="kl">${kills}</span>`
+                + `<span class="pl">${place}</span>`
+                + '</div>';
+        }
+        return html;
     }
 
     // --- режим управления -------------------------------------------------
@@ -779,6 +825,8 @@ setInterval(() => {
     const panelSub = document.getElementById('panelSub');
     const scoreEl = document.getElementById('score');
     const feedEl = document.getElementById('feed');
+    const kitEl = document.getElementById('kit');
+    const boardEl = document.getElementById('board');
     const hudMe = document.getElementById('hudMe');
     const hudStatus = document.getElementById('hudStatus');
 
@@ -869,6 +917,17 @@ setInterval(() => {
 
         const html = feedHtml();
         set('feed', feedEl, html, true);
+
+        // Таблица видна и живьём: список нужен во время боя, а не
+        // только по итогам. В панели она и так стоит, а на поле её
+        // раньше не было вообще.
+        const board = lastSnap && lastSnap.players ? boardHtml() : '';
+        if (board) {
+            boardEl.classList.remove('hidden');
+            set('board', boardEl, board, true);
+        } else {
+            boardEl.classList.add('hidden');
+        }
 
         let hud;
         if (lastSnap) {
