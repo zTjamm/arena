@@ -1394,7 +1394,17 @@ function step(arena, inputs = {}, dt = T.TICK) {
     applyPushes(arena, inputs, dt);
     burstStones(arena);
 
-    for (const p of actors) applyMovement(p, inputs[p.id] || {}, dt);
+    // На счётчике не двигаются **все**, и это не только про честность
+    // старта. Пока идёт отсчёт, бежать некуда: звезда лежит в центре,
+    // а игроки стоят по краям, и добежать до неё за семь секунд ещё
+    // можно — но толкнуться с места нельзя, и толчок тоже запрещён.
+    // Раньше на счётчике можно было ходить, и это выглядело странно:
+    // поле полно народу, все двигаются, а удара нет и подчеркнуть его
+    // нечем.
+    const grace = arena.elapsed < T.SPAWN_GRACE;
+    for (const p of actors) {
+        if (!grace) applyMovement(p, inputs[p.id] || {}, dt);
+    }
     for (const p of actors) integrate(arena, p, dt);
 
     resolveCollisions(arena);

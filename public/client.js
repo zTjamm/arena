@@ -928,6 +928,76 @@ setInterval(() => {
     const kitEl = document.getElementById('kit');
     const boardEl = document.getElementById('board');
     const boardLiveEl = document.getElementById('boardLive');
+    const graceEl = document.getElementById('grace');
+    const graceNumEl = document.getElementById('graceNum');
+
+    /**
+     * Привязка отсчёта и таблицы к настоящим границам доски.
+     *
+     * Обе полосы должны стоять **вплотную к полю**. Привязка к краю
+     * экрана не годится: поле размещено по своим правилам и на телефоне
+     * занимает не весь экран, так что край экрана — это пустое место
+     * между полем и обрезом.
+     *
+     * Границы берутся из того же расчёта, которым размещено поле, — из
+     * `Render.fit`. Иначе полосы поедут при любом повороте экрана или
+     * смене высоты.
+     *
+     * Считается только при смене размера: иначе на каждый кадр
+     * выставлялись бы стили, а это как раз то, чего мы от полей и
+     * добиваемся.
+     */
+    let fieldKey = '';
+    function placeOnField(view, snap) {
+        const key = view.width + 'x' + view.height + '@' + view.scale
+            + '/' + snap.size + '/' + Math.round(view.cx) + ',' + Math.round(view.cy);
+        if (key === fieldKey) return;
+        fieldKey = key;
+
+        const r = Render.fieldRect(view, snap.size);
+        const gap = 6;
+
+        // Таблица — справа от поля. Если поля почти нет (узкий экран),
+        // полоса всё равно влезает в освободившееся место, а не наезжает
+        // на героев.
+        boardLiveEl.style.left = Math.max(2, r.right + gap) + 'px';
+
+        // Отсчёт — правый верхний угол поля, не экрана.
+        //
+        // Ставится именно через `right`, а не `left`: в стилях у полосы
+        // стоит `right: 0`, и если задать ещё и `left`, коробка
+        // растянулась между ними — на 560 пикселей вместо шестидесяти,
+        // то есть поперёк всей верхней части экрана.
+        graceEl.style.top = Math.max(2, r.top + gap) + 'px';
+        graceEl.style.right = Math.max(2, window.innerWidth - r.right + gap) + 'px';
+    }
+
+    /**
+     * Отсчёт: меняем текст, только когда меняется целая секунда.
+     *
+     * На холсте текст перерисовывался шестьдесят раз в секунду, хотя
+     * цифра меняется раз в секунду. Здесь то же самое, но запись в DOM
+     * случается семь раз за партию, а не четыреста двадцать.
+     */
+    let shownGrace = null;
+    function updateGrace(snap) {
+        if (!graceEl || !graceNumEl) return;
+        const left = T.SPAWN_GRACE - (snap ? snap.elapsed : 0);
+
+        if (!(left > 0)) {
+            if (shownGrace !== 0) {
+                shownGrace = 0;
+                graceEl.classList.add('hidden');
+            }
+            return;
+        }
+
+        const n = Math.ceil(left);
+        if (n === shownGrace) return;
+        shownGrace = n;
+        graceEl.classList.remove('hidden');
+        graceNumEl.textContent = String(n);
+    }
     const hudMe = document.getElementById('hudMe');
     const hudStatus = document.getElementById('hudStatus');
 
@@ -1033,6 +1103,8 @@ setInterval(() => {
         } else {
             boardLiveEl.classList.add('hidden');
         }
+
+        updateGrace(lastSnap);
 
         if (board) {
             boardEl.classList.remove('hidden');
@@ -1148,6 +1220,7 @@ setInterval(() => {
                     chains,
                     bursts,
                 });
+                placeOnField(view, snap);
             }
             updatePanel();
         }
@@ -1210,6 +1283,7 @@ setInterval(() => {
             // сеть могла быть другой.
             gapWindow.length = 0;
             frameDelay = 120;
+            shownGrace = null;
             resetShown();
             updateFsBtn();
         },

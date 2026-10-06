@@ -1430,7 +1430,17 @@ function step(arena, inputs = {}, dt = T.TICK) {
     applyPushes(arena, inputs, dt);
     burstStones(arena);
 
-    for (const p of actors) applyMovement(p, inputs[p.id] || {}, dt);
+    // На счётчике не двигаются **все**, и это не только про честность
+    // старта. Пока идёт отсчёт, бежать некуда: звезда лежит в центре,
+    // а игроки стоят по краям, и добежать до неё за семь секунд ещё
+    // можно — но толкнуться с места нельзя, и толчок тоже запрещён.
+    // Раньше на счётчике можно было ходить, и это выглядело странно:
+    // поле полно народу, все двигаются, а удара нет и подчеркнуть его
+    // нечем.
+    const grace = arena.elapsed < T.SPAWN_GRACE;
+    for (const p of actors) {
+        if (!grace) applyMovement(p, inputs[p.id] || {}, dt);
+    }
     for (const p of actors) integrate(arena, p, dt);
 
     resolveCollisions(arena);
@@ -3993,55 +4003,35 @@ function draw(ctx, snap, view, opts = {}) {
     for (const fx of opts.chains || []) drawChainFx(ctx, view, snap, fx, now);
     for (const fx of opts.bursts || []) drawBurstFx(ctx, view, snap, fx, now);
 
-    drawGrace(ctx, view, snap);
+    // Отсчёт с холста убран: он рисуется элементом страницы. Пока он был
+    // здесь, на нём каждый кадр заново задавался шрифт и растрировалась
+    // крупная цифра с обводкой — шестьдесят раз в секунду текст менял
+    // форму, и на телефоне это стоило дороже, чем весь остальной кадр
+    // вместе взятый.
 
     ctx.restore();
 }
 
 /**
- * Обратный отсчёт в начале партии: первые SPAWN_GRACE секунд удара
- * нет.
+ * Где на экране лежит доска.
  *
- * Молчание было бы худшим вариантом: игрок держит кнопку, ждёт
- * полторы секунды, отпускает — и ничего не происходит. Выглядит как
- * сломанный толчок, а не как правило. Поэтому прямо на поле стоит
- * «БОЙ ЧЕРЕЗ 3», и всё видно.
+ * Отсчёт и таблица игроков должны стоять **вплотную к полю**, а не к
+ * краю экрана: на телефоне поля занимает не весь экран, и привязка к
+ * краю уводила их на пустое место.
  *
- * Считается из `snap.elapsed`, который и так есть в снимке, — значит
- * протокол менять не пришлось.
+ * Отступ берётся от половины поля в экранных единицах, поэтому
+ * привязка не зависит ни от размера экрана, ни от масштаба.
  */
-function drawGrace(ctx, view, snap) {
-    const left = T.SPAWN_GRACE - snap.elapsed;
-    if (!(left > 0)) return;
-
-    const cx = view.cx;
-    const cy = view.cy;
-    // Цифра целыми секундами: «2» держится вторую секунду, и глаз
-    // успевает её прочитать, а не ловит мельтешение 2.98 → 1.02.
-    const n = Math.ceil(left);
-    const t = left - Math.floor(left);      // доля внутри текущей секунды
-
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    // Гаснет к концу счёта: счёт идёт 3 → 2 → 1 и уходит незаметно,
-    // а не щёлкает и не мигает.
-    ctx.globalAlpha = 0.35 + 0.65 * (1 - t);
-    ctx.font = '800 ' + Math.max(40, Math.round(view.height * 0.16))
-        + 'px system-ui, -apple-system, sans-serif';
-    ctx.lineWidth = 6;
-    ctx.strokeStyle = 'rgba(12,17,28,0.85)';
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeText(String(n), cx, cy - 12);
-    ctx.fillText(String(n), cx, cy - 12);
-
-    ctx.font = '700 ' + Math.max(13, Math.round(view.height * 0.045))
-        + 'px system-ui, -apple-system, sans-serif';
-    ctx.globalAlpha = 0.7;
-    ctx.fillText('УДАР ЧЕРЕЗ', cx, cy + view.height * 0.10);
-
-    ctx.restore();
+function fieldRect(view, size) {
+    const half = (size / 2) * view.scale;
+    return {
+        left: view.cx - half,
+        right: view.cx + half,
+        top: view.cy - half,
+        bottom: view.cy + half,
+        w: half * 2,
+        h: half * 2,
+    };
 }
 
 module.exports = {
@@ -4050,6 +4040,7 @@ module.exports = {
     PUSH_FX_MS,
     colorOf,
     fit,
+    fieldRect,
     draw,
 };
 

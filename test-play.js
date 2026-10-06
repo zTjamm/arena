@@ -285,8 +285,18 @@ for (const [label, opts] of CASES) {
  */
 function pastGrace(arena) {
     if (arena.elapsed >= T.SPAWN_GRACE) return;
-    const ticks = Math.ceil(T.SPAWN_GRACE / T.TICK);
-    for (let i = 0; i < ticks; i++) step(arena, {});
+    // Идём **до конца** счётчика, а не ровно ceil(7 / (1/60)) тиков.
+    //
+    // 1/60 не representable в двоичной, и 420 таких шагов дают 6.99999…
+    // а не 7. Пока на счётчике было запрещено только бить, такая мелочь
+    // была безобидна: сдвиг на миллионную не влиял ни на что. Теперь
+    // на счётчике нельзя двигаться, и одно лишнее деление решает, начал
+    // ли игрок ходить. Считать надо по состоянию, а не по арифметике.
+    let guard = Math.ceil(T.SPAWN_GRACE / T.TICK) + 5;
+    while (arena.elapsed < T.SPAWN_GRACE && guard-- > 0) step(arena, {});
+    if (arena.elapsed < T.SPAWN_GRACE) {
+        throw new Error('pastGrace не довёл счётчик до конца: ' + arena.elapsed);
+    }
 }
 
 
