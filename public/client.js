@@ -1252,6 +1252,139 @@ setInterval(() => {
          * способ это увидеть. Без ручки пришлось бы судить по ощущениям,
          * а ощущения у сети и у игры одинаковые: «подлагивает».
          */
+        /**
+ * Замер производительности **на этой машине**.
+ *
+ * Нужен потому, что «лагает» — слово без числа. Под ним могут быть три
+ * разные вещи, и лечатся они по-разному:
+ *
+ *   1. Дропы кадров — рвётся картинка. Лечится отрисовкой.
+ *   2. Задержка — картинка плавная, но показывает прошлое. Лечится
+ *      уменьшением отставания. Дропов при этом **ноль**, поэтому по
+ *      одному счёчику кадров такую задержку не увидеть.
+ *   3. Забитый канал — `Game.net`.
+ *
+ * Замер идёт три секунды и честно разводит эти три случая. Должен быть
+ * вызван прямо в бою: вне партии рисуется пустое поле, а интересует
+ * ровно то, что происходит с восемью героями, камнями и звездой.
+ */
+perf(seconds = 3) {
+    return new Promise((resolve) => {
+        const gaps = [];
+        let last = performance.now();
+        let raf = 0;
+        let drawTotal = 0;
+        let drawCalls = 0;
+        const ages = [];
+
+        // Время в отрисовке: оборачиваем её, чтобы узнать, сколько
+        // времени уходит на кадр. Считаем каждый третий вызов, чтобы
+        // сам замер не влиял на результат.
+        const realDraw = Render.draw;
+        const wrapped = function (...args) {
+            const t0 = performance.now();
+            const out = realDraw.apply(this, args);
+            drawTotal += performance.now() - t0;
+            drawCalls++;
+            return out;
+        };
+        Render.draw = wrapped;
+
+        const longTasks = [];
+        let observer = null;
+        try {
+            observer = new PerformanceObserver((list) => {
+                for (const e of list.getEntries()) {
+                    longTasks.push(Math.round(e.duration));
+                }
+            });
+            observer.observe({ entryTypes: ['longtask'] });
+        } catch (_) {
+            // Не везде поддерживается — без неё замер просто беднее.
+        }
+
+        const t0 = performance.now();
+        function tick(t) {
+            if (raf++ > 3) gaps.push(t - last);
+            last = t;
+
+            // Насколько свежий снимок мы показываем.
+            const fresh = frames.length ? performance.now() - frames[frames.length - 1].at : 0;
+            ages.push(fresh);
+
+            if (t - t0 < seconds * 1000) requestAnimationFrame(tick);
+            else {
+                Render.draw = realDraw;
+                if (observer) observer.disconnect();
+
+                gaps.sort((a, b) => a - b);
+                ages.sort((a, b) => a - b);
+                const n = gaps.length;
+
+                resolve({
+                    кадров: n,
+                    кадр_медиана: round(gaps, 0.5),
+                    кадр_p90: round(gaps, 0.9),
+                    кадр_макс: round(gaps, 1),
+                    дропов_длиннее_34мс: gaps.filter((g) => g > 34).length,
+                    дропов_процентов: round2(gaps.filter((g) => g > 34).length / Math.max(n, 1) * 100),
+                    примерно_кадров_в_секунду: round2(1000 / (gaps[Math.floor(n / 2)] || 16.7)),
+
+                    // Главное: сколько миллисекунд мы показываем прошлое.
+                    // Это и есть ощущение «лаг», когда кадры ровные.
+                    показываем_прошлое_мс: round(ages, 0.5),
+                    показываем_прошлое_макс: round(ages, 1),
+                    отставание_буфера: frameDelay,
+
+                    рисование_мс: round2(drawTotal / Math.max(drawCalls, 1)),
+                    вызовов_отрисовки: drawCalls,
+                    budget_кадра_мс: 16.7,
+                    доля_бюджета: round2(drawTotal / Math.max(drawCalls, 1) / 16.7 * 100),
+
+                    // Признак программной отрисовки: без ускорения GPU
+                    // стоимость кадра растёт вместе с числом пикселей.
+                    холст_ускорен: canvasAccelerated(),
+
+                    длинных_задач: longTasks.length,
+                    вкладка_видна: document.visibilityState === 'visible',
+                    окно_в_фокусе: document.hasFocus(),
+                    дпи: window.devicePixelRatio,
+                    холст_размер: canvas.width + 'x' + canvas.height,
+                });
+            }
+        }
+        requestAnimationFrame(tick);
+    });
+
+    function round(arr, q) {
+        return arr.length ? Math.round(arr[Math.min(arr.length - 1, Math.floor(arr.length * q))] * 10) / 10 : null;
+    }
+    function round2(v) {
+        return Math.round(v * 100) / 100;
+    }
+
+    /**
+     * Ускорен ли холст видеокартой.
+     *
+     * Признак: если браузер рисует программно, стоимость кадра растёт
+     * вместе с площадью. У нас она не росла на 16-кратной площади —
+     * значит на той машине, где меряли, ускорение было. На телефоне
+     * может не быть, и тогда движок имел бы смысл.
+     */
+    function canvasAccelerated() {
+        try {
+            const gl = document.createElement('canvas').getContext('webgl');
+            if (!gl) return 'нет webgl';
+            const ext = gl.getExtension('WEBGL_debug_renderer_info');
+            const name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : 'неизвестно';
+            const lost = gl.isContextLost();
+            return (lost ? 'контекст потерян, ' : '') + String(name).slice(0, 80);
+        } catch (e) {
+            return 'не смогли проверить: ' + e.message;
+        }
+    }
+},
+
         get net() {
             const s = [...gapWindow].sort((a, b) => a - b);
             return {
